@@ -1,4 +1,14 @@
+'use client';
+
 export default function Home() {
+  const handleConnectFacebook = () => {
+    const appId = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID;
+    const redirectUri = encodeURIComponent(`${window.location.origin}/api/auth/facebook/callback`);
+    const scope = encodeURIComponent('pages_show_list,business_management,pages_read_engagement,pages_read_user_content,pages_manage_posts');
+
+    window.location.href = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirectUri}&scope=${scope}`;
+  };
+
   return (
     <main style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', color: '#1f2937', lineHeight: '1.6', margin: 0, padding: 0, background: '#f9fafb', minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', scrollBehavior: 'smooth' }}>
       
@@ -15,10 +25,11 @@ export default function Home() {
             <span style={{ fontSize: '11px', color: '#4b5563', fontWeight: '600' }}>Enterprise Digital Solutions</span>
           </div>
         </div>
-        <nav style={{ display: 'flex', gap: '25px', fontSize: '14px', fontWeight: '600' }}>
+        <nav style={{ display: 'flex', gap: '25px', fontSize: '14px', fontWeight: '600', alignItems: 'center' }}>
           <a href="#about" style={{ color: '#4b5563', textDecoration: 'none' }}>Mengenai Kami</a>
           <a href="#services" style={{ color: '#4b5563', textDecoration: 'none' }}>Perkhidmatan</a>
           <a href="#contact" style={{ color: '#4b5563', textDecoration: 'none' }}>Hubungi</a>
+          <a href="/add-account" style={{ color: '#4b5563', textDecoration: 'none' }}>Add Social Account</a>
           <a href="/scheduler" style={{ color: '#2563eb', textDecoration: 'none' }}>Scheduler Login</a>
         </nav>
       </header>
@@ -35,7 +46,13 @@ export default function Home() {
           <p style={{ color: '#4b5563', fontSize: '15px', marginBottom: '25px' }}>
             Max Baginda Trading komited menyediakan solusi perisian, automasi pemasaran, dan infrastruktur digital yang efisien untuk operasi perniagaan moden.
           </p>
-          <div style={{ display: 'flex', gap: '15px' }}>
+          <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
+            <button 
+              onClick={handleConnectFacebook}
+              style={{ background: '#1877F2', color: '#fff', padding: '12px 24px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 4px 6px rgba(24, 119, 242, 0.3)', display: 'flex', alignItems: 'center', gap: '8px' }}
+            >
+              + Connect Facebook Page
+            </button>
             <a href="/scheduler" style={{ background: '#111827', color: '#fff', padding: '12px 24px', borderRadius: '6px', textDecoration: 'none', fontWeight: 'bold', boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)' }}>
               Buka Facebook Scheduler
             </a>

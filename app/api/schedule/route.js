@@ -1,11 +1,13 @@
+// app/api/schedule/route.js
+
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabaseClient'; // Menggunakan client supabase sedia ada dari lib
+import { supabase } from '@/lib/supabaseClient';
 
 export async function POST(request) {
   try {
     const body = await request.json();
     const { 
-      pages,            // Array of selected pages [{ page_id, access_token }, ...]
+      pages,            // Array selected pages [{ page_id, access_token }, ...]
       message,          // Mesej post
       imageUrl,         // Public URL gambar dari Supabase Storage
       mode,             // 'now', 'manual', atau 'auto'
@@ -15,11 +17,19 @@ export async function POST(request) {
     } = body;
 
     if (!pages || pages.length === 0) {
-      return NextResponse.json({ error: 'Sila pilih sekurang-kurangnya satu Page.' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Sila pilih sekurang-kurangnya satu Page.' }, 
+        { status: 400 }
+      );
     }
 
-    // Process serentak untuk semua page menggunakan Promise.allSettled
-    const postPromises = pages.map(async (page) => {
+    // 🔴 BUANG PAGE DUPLIKAT (Mengelakkan posting berulang untuk page yang sama)
+    const uniquePages = Array.from(
+      new Map(pages.map(item => [item.page_id, item])).values()
+    );
+
+    // Process serentak untuk semua page unik menggunakan Promise.allSettled
+    const postPromises = uniquePages.map(async (page) => {
       const { page_id, access_token } = page;
 
       // ==========================================
@@ -45,11 +55,13 @@ export async function POST(request) {
         });
 
         const fbData = await fbRes.json();
-        if (fbData.error) throw new Error(`[${page_id}] FB Error: ${fbData.error.message}`);
+        if (fbData.error) {
+          throw new Error(`[${page_id}] FB Error: ${fbData.error.message}`);
+        }
 
         const postId = fbData.id || fbData.post_id;
 
-        // Post First Comment jika ada
+        // Post First Comment jika disediakan
         if (firstComment || commentImageUrl) {
           await postFirstComment(postId, access_token, firstComment, commentImageUrl);
         }
@@ -85,8 +97,11 @@ export async function POST(request) {
         });
 
         const fbData = await fbRes.json();
-        if (fbData.error) throw new Error(`[${page_id}] FB Schedule Error: ${fbData.error.message}`);
+        if (fbData.error) {
+          throw new Error(`[${page_id}] FB Schedule Error: ${fbData.error.message}`);
+        }
 
+        // Simpan First Comment ke database untuk dieksekusi semasa jadual dipublish
         if (firstComment || commentImageUrl) {
           await supabase.from('scheduled_comments').insert({
             page_id,
@@ -102,7 +117,7 @@ export async function POST(request) {
       } 
 
       // ==========================================
-      // MOD 3: AUTO-QUEUE / FATIN ('auto')
+      // MOD 3: AUTO-QUEUE ('auto')
       // ==========================================
       else if (mode === 'auto') {
         const { error } = await supabase.from('auto_queue').insert({
@@ -116,13 +131,15 @@ export async function POST(request) {
           created_at: new Date().toISOString()
         });
 
-        if (error) throw new Error(`[${page_id}] Queue DB Error: ${error.message}`);
+        if (error) {
+          throw new Error(`[${page_id}] Queue DB Error: ${error.message}`);
+        }
 
         return { page_id, status: 'queued' };
       }
     });
 
-    // PARALLEL EXECUTION: Hantar kesemua request serentak
+    // PARALLEL EXECUTION: Jalankan kesemua panggilan API serentak
     const results = await Promise.allSettled(postPromises);
 
     const successful = results
@@ -135,7 +152,7 @@ export async function POST(request) {
 
     return NextResponse.json({
       success: true,
-      total: pages.length,
+      totalProcessed: uniquePages.length,
       successCount: successful.length,
       failedCount: failed.length,
       successful,
@@ -147,7 +164,7 @@ export async function POST(request) {
   }
 }
 
-// Helper Function First Comment
+// Helper Function untuk First Comment
 async function postFirstComment(postId, accessToken, commentText, commentImageUrl) {
   try {
     let commentPayload = { access_token: accessToken };
@@ -161,6 +178,6 @@ async function postFirstComment(postId, accessToken, commentText, commentImageUr
       body: JSON.stringify(commentPayload),
     });
   } catch (err) {
-    console.error(`Gagal First Comment post ${postId}:`, err);
+    console.error(`Gagal hantar First Comment pada post ${postId}:`, err);
   }
 }

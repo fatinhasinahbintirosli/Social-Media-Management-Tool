@@ -77,11 +77,20 @@ export default function SchedulerPage() {
   };
 
   const handleSelectAll = () => {
-    setSelectedPages(selectedPages.length === pages.length ? [] : pages.map(p => p.page_id));
+    if (selectedPages.length === pages.length) {
+      setSelectedPages([]);
+    } else {
+      setSelectedPages(pages.map(p => String(p.page_id)));
+    }
   };
 
   const handlePageToggle = (pageId) => {
-    setSelectedPages(selectedPages.includes(pageId) ? selectedPages.filter(id => id !== pageId) : [...selectedPages, pageId]);
+    const stringId = String(pageId);
+    if (selectedPages.includes(stringId)) {
+      setSelectedPages(selectedPages.filter(id => id !== stringId));
+    } else {
+      setSelectedPages([...selectedPages, stringId]);
+    }
   };
 
   const handleFileUpload = async (e, setUrlState) => {
@@ -125,7 +134,6 @@ export default function SchedulerPage() {
       }
     }
 
-    // Laraskan masa jika mod 'now' dipilih
     let finalScheduledAt = scheduledAt || null;
     if (postMode === 'now') {
       finalScheduledAt = new Date(Date.now() - 5 * 60 * 1000).toISOString();
@@ -154,7 +162,6 @@ export default function SchedulerPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      // JIKA PILIH 'POS SEKARANG': Pemicu automatik API cron serta-merta
       if (postMode === 'now') {
         await fetch('/api/cron/process-posts');
       }
@@ -206,7 +213,6 @@ export default function SchedulerPage() {
   return (
     <main style={{ maxWidth: '1400px', margin: '20px auto', padding: '20px', fontFamily: 'sans-serif' }}>
       
-      {/* Bahagian Atas: Profil & Navigasi */}
       <div style={{ background: '#e7f3ff', padding: '15px', borderRadius: '10px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
         <div><strong>👤 Profil Pengguna Semasa:</strong> {currentProfile}</div>
         <div style={{ display: 'flex', gap: '10px' }}>
@@ -234,13 +240,10 @@ export default function SchedulerPage() {
 
       <h1 style={{ color: '#1877f2', marginBottom: '20px' }}>Facebook Scheduler & Preview</h1>
 
-      {/* REKA BENTUK 2 KOLUM (KIRI: FORM, KANAN: LIVE PREVIEW) */}
       <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '30px', alignItems: 'start' }}>
         
-        {/* KOLUM KIRI: BORANG PENGISIAN */}
         <form onSubmit={handleSubmit} style={{ background: '#f8f9fa', padding: '20px', borderRadius: '10px', border: '1px solid #dee2e6' }}>
           
-          {/* Pilih Pages */}
           <div style={{ marginBottom: '20px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <label style={{ fontWeight: 'bold' }}>Pilih Pages ({selectedPages.length}/{pages.length}):</label>
@@ -254,7 +257,11 @@ export default function SchedulerPage() {
               <div style={{ height: '140px', overflowY: 'auto', background: '#fff', padding: '10px', border: '1px solid #ccc', borderRadius: '6px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                 {pages.map(p => (
                   <label key={p.page_id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
-                    <input type="checkbox" checked={selectedPages.includes(p.page_id)} onChange={() => handlePageToggle(p.page_id)} />
+                    <input 
+                      type="checkbox" 
+                      checked={selectedPages.includes(String(p.page_id))} 
+                      onChange={() => handlePageToggle(p.page_id)} 
+                    />
                     {p.page_name}
                   </label>
                 ))}
@@ -262,13 +269,11 @@ export default function SchedulerPage() {
             )}
           </div>
 
-          {/* Kapsyen */}
           <div style={{ marginBottom: '15px' }}>
             <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Kapsyen:</label>
             <textarea value={message} onChange={e => setMessage(e.target.value)} placeholder="Tulis kapsyen pos anda..." style={{ width: '100%', height: '90px', padding: '8px', borderRadius: '6px', border: '1px solid #ccc', boxSizing: 'border-box' }} />
           </div>
 
-          {/* Upload Media Utama */}
           <div style={{ marginBottom: '15px' }}>
             <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Upload Gambar / Video Utama (Pilihan):</label>
             <input 
@@ -288,13 +293,11 @@ export default function SchedulerPage() {
             {fileUploading && <small style={{ color: '#0d6efd' }}>Sedang memuat naik fail ke storage...</small>}
           </div>
 
-          {/* First Comment */}
           <div style={{ marginBottom: '15px' }}>
             <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>First Comment (Komen Pertama):</label>
             <textarea value={firstComment} onChange={e => setFirstComment(e.target.value)} placeholder="Tulis komen pertama (pilihan)..." style={{ width: '100%', height: '60px', padding: '8px', borderRadius: '6px', border: '1px solid #ccc', boxSizing: 'border-box' }} />
           </div>
 
-          {/* Comment Image URL */}
           <div style={{ marginBottom: '20px' }}>
             <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Gambar untuk First Comment (Pilihan):</label>
             <input 
@@ -313,7 +316,6 @@ export default function SchedulerPage() {
             />
           </div>
 
-          {/* Pilihan Mod Hantaran */}
           <div style={{ marginBottom: '20px', display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap', fontSize: '14px' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', fontWeight: 'bold' }}>
               <input type="radio" name="postMode" checked={postMode === 'now'} onChange={() => { setPostMode('now'); setScheduledAt(''); }} /> Pos Sekarang
@@ -342,7 +344,6 @@ export default function SchedulerPage() {
           </button>
         </form>
 
-        {/* KOLUM KANAN: FACEBOOK LIVE PREVIEW ALA SOCIALCHAMP */}
         <div style={{ background: '#ffffff', padding: '20px', borderRadius: '10px', border: '1px solid #dee2e6', position: 'sticky', top: '20px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
             <span style={{ fontWeight: 'bold', color: '#1877f2', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -351,10 +352,8 @@ export default function SchedulerPage() {
             <span style={{ fontSize: '11px', background: '#e7f3ff', color: '#1877f2', padding: '3px 8px', borderRadius: '4px', fontWeight: 'bold' }}>Desktop Feed</span>
           </div>
 
-          {/* Kotak Mockup Facebook Post */}
           <div style={{ border: '1px solid #ccd0d5', borderRadius: '8px', background: '#fff', padding: '12px', fontFamily: 'Helvetica, Arial, sans-serif' }}>
             
-            {/* Header Profil Page */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
               <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#1877f2', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '16px' }}>
                 MB
@@ -365,12 +364,10 @@ export default function SchedulerPage() {
               </div>
             </div>
 
-            {/* Kapsyen Preview */}
             <div style={{ fontSize: '14px', color: '#050505', marginBottom: '10px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', minHeight: '24px' }}>
               {message || <span style={{ color: '#b0b3b8', fontStyle: 'italic' }}>Kapsyen hantaran anda akan dipaparkan di sini...</span>}
             </div>
 
-            {/* Media Utama (Gambar / Video) */}
             {imageUrl ? (
               <div style={{ marginBottom: '10px', borderRadius: '6px', overflow: 'hidden', background: '#000', maxHeight: '250px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                 {isVideo ? (
@@ -385,14 +382,12 @@ export default function SchedulerPage() {
               </div>
             )}
 
-            {/* Butang Interaksi Palsu FB */}
             <div style={{ display: 'flex', justifyContent: 'space-around', borderTop: '1px solid #e4e6eb', borderBottom: '1px solid #e4e6eb', padding: '6px 0', fontSize: '13px', color: '#65676b', fontWeight: '600', marginBottom: '10px' }}>
               <span>👍 Suka</span>
               <span>💬 Komen</span>
               <span>↗️ Kongsi</span>
             </div>
 
-            {/* PREVIEW FIRST COMMENT DI BAWAH */}
             {(firstComment || commentImageUrl) && (
               <div style={{ background: '#f0f2f5', padding: '8px 10px', borderRadius: '8px', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
                 <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#65676b', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 'bold', flexShrink: '0' }}>

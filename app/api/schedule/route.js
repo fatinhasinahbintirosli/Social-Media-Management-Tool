@@ -1,186 +1,114 @@
-// app/api/schedule/route.js
-
 import { NextResponse } from 'next/server';
-import { supabase } from '../../../lib/supabaseClient';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+);
 
 export async function POST(request) {
   try {
     const body = await request.json();
-    
-    // Menyokong fleksibiliti nama pemboleh ubah dari Frontend
-    const rawPages = body.pages || body.selectedPages || body.pagesPayload || [];
-    const message = body.message || body.caption || body.postText || '';
-    const imageUrl = body.imageUrl || body.image_url || '';
-    const mode = body.mode || 'now';
-    const scheduledTime = body.scheduledTime || body.scheduled_time;
-    const firstComment = body.firstComment || body.first_comment;
-    const commentImageUrl = body.commentImageUrl || body.comment_image_url;
+    const { pageIds, message, imageUrl, videoUrl, firstComment, commentImageUrl, scheduledAt, profile } = body;
 
-    if (!rawPages || rawPages.length === 0) {
-      return NextResponse.json(
-        { error: 'Sila pilih sekurang-kurangnya satu Page.' }, 
-        { status: 400 }
-      );
+    if (!pageIds || !Array.isArray(pageIds) || pageIds.length === 0) {
+      return NextResponse.json({ error: 'Sila pilih sekurang-kurangnya satu Page.' }, { status: 400 });
     }
 
-    // 🔴 Pembersihan Duplikat: Buang page_id yang berulang
-    const uniquePages = Array.from(
-      new Map(rawPages.map(item => [item.page_id || item.id, item])).values()
-    );
+    // Jika menggunakan auto-queue atau jadual manual
+    if (scheduledAt === 'auto-queue' || (scheduledAt && new Date(scheduledAt) > new Date())) {
+      // Masukkan ke dalam jadual database
+      const queueItems = pageIds.map(pageId => ({
+        page_id: pageId,
+        message,
+        image_url: imageUrl,
+        video_url: videoUrl,
+        first_comment: firstComment,
+        comment_image_url: commentImageUrl,
+        scheduled_at: scheduledAt === 'auto-queue' ? null : scheduledAt,
+        status: 'pending',
+        profile: profile || 'Fatin'
+      }));
 
-    // Dynamic Parallel Execution menggunakan Promise.allSettled
-    const postPromises = uniquePages.map(async (page) => {
-      const page_id = page.page_id || page.id;
-      const access_token = page.access_token || page.token;
+      const { error } = await supabase.from('scheduled_posts').insert(queueItems);
+      if (error) throw new Error(error.message);
 
-      if (!page_id || !access_token) {
-        throw new Error(`Maklumat Page tidak lengkap untuk ID: ${page_id}`);
-      }
+      return NextResponse.json({ success: true, message: 'Berjaya dimasukkan ke dalam senarai queue!' });
+    }
 
-      // ==========================================
-      // MOD 1: POS SEKARANG ('now')
-      // ==========================================
-      if (mode === 'now') {
-        let endpoint = `https://graph.facebook.com/v19.0/${page_id}/feed`;
-        let payload = {
-          access_token: access_token,
-          message: message,
-        };
+    // Jika pos terus (pos sekarang) menggunakan Promise.allSettled
+    const results = await Promise.allSettled(
+      pageIds.map(async (pageId) => {
+        // Dapatkan token akses untuk page tersebut dari database
+        const { data: pageData, error: pageError } = await supabase
+          .from('pages')
+          .select('access_token')
+          .eq('page_id', pageId)
+          .single();
 
-        if (imageUrl) {
-          endpoint = `https://graph.facebook.com/v19.0/${page_id}/photos`;
-          payload.url = imageUrl;
-          payload.caption = message;
+        if (pageError || !pageData?.access_token) {
+          throw new Error(`Token tidak dijumpai untuk page ID: ${pageId}`);
+        }
+
+        const accessToken = pageData.access_token;
+        let endpoint = `https://graph.facebook.com/v19.0/${pageId}/feed`;
+        let postData = { message, access_token: accessToken };
+
+        if (videoUrl) {
+          endpoint = `https://graph.facebook.com/v19.0/${pageId}/videos`;
+          postData = { description: message, file_url: videoUrl, access_token: accessToken };
+        } else if (imageUrl) {
+          endpoint = `https://graph.facebook.com/v19.0/${pageId}/photos`;
+          postData = { caption: message, url: imageUrl, access_token: accessToken };
         }
 
         const fbRes = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(postData),
         });
 
-        const fbData = await fbRes.json();
-        if (fbData.error) {
-          throw new Error(`[${page_id}] FB Error: ${fbData.error.message}`);
+        const fbResult = await fbRes.json();
+        if (!fbRes.ok) {
+          throw new Error(fbResult.error?.message || 'Gagal pos ke Facebook');
         }
 
-        const postId = fbData.id || fbData.post_id;
+        // Jika ada first comment
+        if (firstComment && fbResult.id) {
+          const commentEndpoint = `https://graph.facebook.com/v19.0/${fbResult.id}/comments`;
+          let commentData = { message: firstComment, access_token: accessToken };
 
-        // Hantar First Comment jika disediakan
-        if (firstComment || commentImageUrl) {
-          await postFirstComment(postId, access_token, firstComment, commentImageUrl);
-        }
+          if (commentImageUrl) {
+            // Jika ada gambar untuk komen
+            commentData.attachment_url = commentImageUrl;
+          }
 
-        return { page_id, status: 'posted', postId };
-      } 
-
-      // ==========================================
-      // MOD 2: JADUAL MANUAL ('manual')
-      // ==========================================
-      else if (mode === 'manual') {
-        const publishTimestamp = Math.floor(new Date(scheduledTime).getTime() / 1000);
-        
-        let endpoint = `https://graph.facebook.com/v19.0/${page_id}/feed`;
-        let payload = {
-          access_token: access_token,
-          published: false,
-          scheduled_publish_time: publishTimestamp,
-        };
-
-        if (imageUrl) {
-          endpoint = `https://graph.facebook.com/v19.0/${page_id}/photos`;
-          payload.url = imageUrl;
-          payload.caption = message;
-        } else {
-          payload.message = message;
-        }
-
-        const fbRes = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-
-        const fbData = await fbRes.json();
-        if (fbData.error) {
-          throw new Error(`[${page_id}] FB Schedule Error: ${fbData.error.message}`);
-        }
-
-        if (firstComment || commentImageUrl) {
-          await supabase.from('scheduled_comments').insert({
-            page_id,
-            post_id: fbData.id,
-            comment_text: firstComment,
-            comment_image_url: commentImageUrl,
-            scheduled_at: scheduledTime,
-            status: 'pending'
+          await fetch(commentEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(commentData),
           });
         }
 
-        return { page_id, status: 'scheduled', scheduledTime };
-      } 
+        return { pageId, success: true };
+      })
+    );
 
-      // ==========================================
-      // MOD 3: AUTO-QUEUE ('auto')
-      // ==========================================
-      else if (mode === 'auto') {
-        const { error } = await supabase.from('auto_queue').insert({
-          page_id: page_id,
-          access_token: access_token,
-          message: message,
-          image_url: imageUrl,
-          first_comment: firstComment,
-          comment_image_url: commentImageUrl,
-          status: 'queued',
-          created_at: new Date().toISOString()
-        });
+    // Semak keputusan Promise.allSettled
+    const failures = results.filter(r => r.status === 'rejected');
+    if (failures.length > 0 && failures.length === pageIds.length) {
+      throw new Error(failures[0].reason.message || 'Semua pos gagal dihantar.');
+    }
 
-        if (error) {
-          throw new Error(`[${page_id}] Queue DB Error: ${error.message}`);
-        }
-
-        return { page_id, status: 'queued' };
-      }
+    return NextResponse.json({ 
+      success: true, 
+      message: failures.length > 0 
+        ? `Pos berjaya dihantar ke sesetengah page (${pageIds.length - failures.length}/${pageIds.length}).` 
+        : 'Pos berjaya dihantar ke semua Page terpilih!' 
     });
 
-    const results = await Promise.allSettled(postPromises);
-
-    const successful = results
-      .filter(r => r.status === 'fulfilled')
-      .map(r => r.value);
-
-    const failed = results
-      .filter(r => r.status === 'rejected')
-      .map(r => r.reason.message);
-
-    return NextResponse.json({
-      success: true,
-      totalProcessed: uniquePages.length,
-      successCount: successful.length,
-      failedCount: failed.length,
-      successful,
-      failed
-    }, { status: 200 });
-
   } catch (err) {
+    console.error('Ralat API Schedule:', err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
-  }
-}
-
-// Helper Function First Comment
-async function postFirstComment(postId, accessToken, commentText, commentImageUrl) {
-  try {
-    let commentPayload = { access_token: accessToken };
-    
-    if (commentText) commentPayload.message = commentText;
-    if (commentImageUrl) commentPayload.attachment_url = commentImageUrl;
-
-    await fetch(`https://graph.facebook.com/v19.0/${postId}/comments`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(commentPayload),
-    });
-  } catch (err) {
-    console.error(`Gagal First Comment post ${postId}:`, err);
   }
 }

@@ -3,7 +3,6 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-// Fungsi bantuan delay
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function GET() {
@@ -52,7 +51,7 @@ export async function GET() {
         }
 
         try {
-          let targetPostId = null;
+          let rawPostId = null;
 
           // A) HANTAR GAMBAR UTAMA
           if (post.image_url) {
@@ -67,9 +66,7 @@ export async function GET() {
             });
             const fbData = await fbRes.json();
             if (fbData.error) throw new Error(`Media Error: ${fbData.error.message}`);
-            
-            // Facebook memulangkan post_id (id post luaran) atau id photo
-            targetPostId = fbData.post_id || fbData.id;
+            rawPostId = fbData.post_id || fbData.id;
           } 
           // B) HANTAR VIDEO UTAMA
           else if (post.video_url) {
@@ -84,7 +81,7 @@ export async function GET() {
             });
             const fbData = await fbRes.json();
             if (fbData.error) throw new Error(`Video Error: ${fbData.error.message}`);
-            targetPostId = fbData.id;
+            rawPostId = fbData.id;
           } 
           // C) HANTAR TEKS SAHAJA
           else {
@@ -98,45 +95,51 @@ export async function GET() {
             });
             const fbData = await fbRes.json();
             if (fbData.error) throw new Error(`Feed Error: ${fbData.error.message}`);
-            targetPostId = fbData.id;
+            rawPostId = fbData.id;
           }
 
-          // D) HANTAR FIRST COMMENT (Tunggu 2 saat supaya ID bersedia di Facebook Graph)
-          if (targetPostId && (post.first_comment || post.comment_image_url)) {
-            await sleep(2000); // Penangguhan 2 saat
+          // D) HANTAR FIRST COMMENT
+          if (rawPostId && (post.first_comment || post.comment_image_url)) {
+            await sleep(2000); // Tunggu Facebook index pos
 
-            const commentPayload = { access_token: accessToken };
+            // Bersihkan ID: Jika ID berbentuk PAGEID_POSTID, ambil bahagian POSTID atau kekalkan mengikut keperluan Graph API
+            const targetId = rawPostId;
+
+            // Bina URL form-data / URLSearchParams untuk ketepatan Meta Graph API
+            const commentParams = new URLSearchParams();
+            commentParams.append('access_token', accessToken);
+            
             if (post.first_comment) {
-              commentPayload.message = post.first_comment;
+              commentParams.append('message', post.first_comment);
             }
             if (post.comment_image_url) {
-              commentPayload.attachment_url = post.comment_image_url;
+              commentParams.append('attachment_url', post.comment_image_url);
             }
 
-            const commentRes = await fetch(`https://graph.facebook.com/v19.0/${targetPostId}/comments`, {
+            const commentRes = await fetch(`https://graph.facebook.com/v19.0/${targetId}/comments`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(commentPayload),
+              body: commentParams,
             });
 
             const commentData = await commentRes.json();
 
-            // Jika masih gagal guna post_id, cuba post terus menggunakan id asas
             if (commentData.error) {
-              console.warn('Pertama gagal, mencuba fallback comment:', commentData.error.message);
-              
-              // Padamkan attachment_url jika ia yang menyebabkan ralat Facebook
-              delete commentPayload.attachment_url;
-              if (post.first_comment) {
-                const retryRes = await fetch(`https://graph.facebook.com/v19.0/${targetPostId}/comments`, {
+              // Jika gagal sebab attachment, cuba hantar mesej sahaja
+              if (post.comment_image_url && post.first_comment) {
+                const retryParams = new URLSearchParams();
+                retryParams.append('access_token', accessToken);
+                retryParams.append('message', post.first_comment);
+
+                const retryRes = await fetch(`https://graph.facebook.com/v19.0/${targetId}/comments`, {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(commentPayload),
+                  body: retryParams,
                 });
                 const retryData = await retryRes.json();
                 if (retryData.error) {
-                  console.error('Komen gagal sepenuhnya:', retryData.error.message);
+                  throw new Error(`Comment Error: ${retryData.error.message}`);
                 }
+              } else {
+                throw new Error(`Comment Error: ${commentData.error.message}`);
               }
             }
           }
@@ -147,7 +150,7 @@ export async function GET() {
         }
       }
 
-      // Kemas kini status dalam database Supabase
+      // Kemas kini status dalam pangkalan data Supabase
       if (hasError) {
         await supabase
           .from('scheduled_posts')

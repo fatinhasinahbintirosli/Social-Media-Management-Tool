@@ -3,8 +3,10 @@
 import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 export default function SchedulerPage() {
+  const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState(false);
@@ -12,7 +14,7 @@ export default function SchedulerPage() {
   const CORRECT_PASSWORD = 'mohdfadliselangor1';
 
   const [pages, setPages] = useState([]);
-  const [selectedPages, setSelectedPages] = useState([]); // Simpan ID page terus sebagai string
+  const [selectedPages, setSelectedPages] = useState([]);
   const [message, setMessage] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [commentImageUrl, setCommentImageUrl] = useState('');
@@ -39,16 +41,8 @@ export default function SchedulerPage() {
     setCurrentProfile(savedProfile);
 
     async function initData() {
-      const { data: pData, error } = await supabase
-        .from('pages')
-        .select('page_id, page_name')
-        .order('page_name', { ascending: true });
-        
-      if (error) {
-        console.error('Ralat ambil pages:', error.message);
-      } else {
-        setPages(pData || []);
-      }
+      const { data: pData } = await supabase.from('pages').select('page_id, page_name').order('page_name', { ascending: true });
+      setPages(pData || []);
       setFetchingPages(false);
     }
     initData();
@@ -76,31 +70,12 @@ export default function SchedulerPage() {
     localStorage.setItem('fb_scheduler_profile', profileName);
   };
 
-  const handleConnectFacebook = () => {
-    const appId = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID;
-    const redirectUri = encodeURIComponent(`${window.location.origin}/api/auth/facebook/callback`);
-    const scope = encodeURIComponent('pages_show_list,business_management,pages_read_engagement,pages_read_user_content,pages_manage_posts');
-
-    window.location.href = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirectUri}&scope=${scope}`;
-  };
-
   const handleSelectAll = () => {
-    if (selectedPages.length === pages.length) {
-      setSelectedPages([]);
-    } else {
-      setSelectedPages(pages.map(p => String(p.page_id)));
-    }
+    setSelectedPages(selectedPages.length === pages.length ? [] : pages.map(p => p.page_id));
   };
 
   const handlePageToggle = (pageId) => {
-    const targetId = String(pageId);
-    setSelectedPages(prev => {
-      if (prev.includes(targetId)) {
-        return prev.filter(id => id !== targetId);
-      } else {
-        return [...prev, targetId];
-      }
-    });
+    setSelectedPages(selectedPages.includes(pageId) ? selectedPages.filter(id => id !== pageId) : [...selectedPages, pageId]);
   };
 
   const handleFileUpload = async (e, setUrlState) => {
@@ -112,16 +87,13 @@ export default function SchedulerPage() {
     const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`;
     
     const { error } = await supabase.storage
-      .from('social media management tool')
+      .from('post-media')
       .upload(fileName, file);
 
     if (error) {
       alert('Gagal memuat naik fail: ' + error.message);
     } else {
-      const { data: publicUrlData } = supabase.storage
-        .from('social media management tool')
-        .getPublicUrl(fileName);
-        
+      const { data: publicUrlData } = supabase.storage.from('post-media').getPublicUrl(fileName);
       setUrlState(publicUrlData.publicUrl);
     }
     setFileUploading(false);
@@ -129,13 +101,7 @@ export default function SchedulerPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    console.log("Senarai Page ID dihantar:", selectedPages);
-
-    if (!selectedPages || selectedPages.length === 0) {
-      alert('Ralat: Sila pilih sekurang-kurangnya satu Page.');
-      return;
-    }
+    if (selectedPages.length === 0) return alert('Sila pilih sekurang-kurangnya satu Facebook Page.');
 
     setLoading(true);
     
@@ -150,11 +116,13 @@ export default function SchedulerPage() {
       }
     }
 
-    let finalScheduledAt = scheduledAt || null;
-    if (postMode === 'now') {
-      finalScheduledAt = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-    } else if (postMode === 'auto') {
-      finalScheduledAt = 'auto-queue';
+    // PENTING: Laraskan masa manual supaya mengekalkan waktu tempatan yang dipilih
+    let formattedScheduledAt = null;
+    if (postMode === 'manual' && scheduledAt) {
+      const localDate = new Date(scheduledAt);
+      const offsetMs = localDate.getTimezoneOffset() * 60 * 1000;
+      const adjustedDate = new Date(localDate.getTime() - offsetMs);
+      formattedScheduledAt = adjustedDate.toISOString().slice(0, 19).replace('T', ' ');
     }
 
     const payload = {
@@ -164,7 +132,7 @@ export default function SchedulerPage() {
       videoUrl: finalVideoUrl,
       firstComment: firstComment || null,
       commentImageUrl: commentImageUrl || null,
-      scheduledAt: finalScheduledAt,
+      scheduledAt: postMode === 'auto' ? 'auto-queue' : formattedScheduledAt,
       profile: currentProfile,
     };
 
@@ -177,18 +145,13 @@ export default function SchedulerPage() {
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-
-      if (postMode === 'now') {
-        await fetch('/api/cron/process-posts');
-      }
-
       alert(data.message || 'Berjaya!');
       
       setMessage(''); 
       setImageUrl(''); 
       setFirstComment(''); 
       setCommentImageUrl('');
-      setSelectedPages([]);
+      setScheduledAt('');
     } catch (err) {
       alert(`Ralat: ${err.message}`);
     } finally {
@@ -241,18 +204,20 @@ export default function SchedulerPage() {
       <div style={{ marginBottom: '20px', display: 'flex', gap: '10px', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           <Link href="/queue-settings" style={{ padding: '8px 14px', background: '#333', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontSize: '13px', fontWeight: 'bold' }}>⚙️ Update Time Slots ({currentProfile})</Link>
-          <Link href="/queue" style={{ padding: '8px 14px', background: '#1877f2', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontSize: '13px', fontWeight: 'bold' }}>📋 Lihat Senarai Queue</Link>
-        </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          
+          {/* Butang Lihat Senarai Queue menggunakan router.push */}
           <button 
-            type="button"
-            onClick={handleConnectFacebook}
-            style={{ padding: '8px 14px', background: '#1877F2', color: '#fff', borderRadius: '6px', border: 'none', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+            type="button" 
+            onClick={() => router.push('/queue')} 
+            style={{ padding: '8px 14px', background: '#1877f2', color: '#fff', borderRadius: '6px', border: 'none', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer' }}
           >
-            + Connect Facebook Page
+            📋 Lihat Senarai Queue
           </button>
+        </div>
+
+        <div style={{ display: 'flex', gap: '10px' }}>
           <a href="/" style={{ padding: '8px 14px', background: '#6c757d', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontSize: '13px', fontWeight: 'bold' }}>🏠 Laman Utama</a>
-          <button type="button" onClick={handleLogout} style={{ padding: '8px 14px', background: '#dc3545', color: '#fff', borderRadius: '6px', border: 'none', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer' }}>🔒 Log Keluar</button>
+          <button onClick={handleLogout} style={{ padding: '8px 14px', background: '#dc3545', color: '#fff', borderRadius: '6px', border: 'none', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer' }}>🔒 Log Keluar</button>
         </div>
       </div>
 
@@ -273,21 +238,12 @@ export default function SchedulerPage() {
               <p style={{ fontSize: '13px' }}>Memuatkan senarai page...</p>
             ) : (
               <div style={{ height: '140px', overflowY: 'auto', background: '#fff', padding: '10px', border: '1px solid #ccc', borderRadius: '6px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                {pages.map(p => {
-                  const pageIdStr = String(p.page_id);
-                  const isChecked = selectedPages.includes(pageIdStr);
-                  
-                  return (
-                    <label key={p.page_id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={isChecked} 
-                        onChange={() => handlePageToggle(p.page_id)} 
-                      />
-                      {p.page_name}
-                    </label>
-                  );
-                })}
+                {pages.map(p => (
+                  <label key={p.page_id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={selectedPages.includes(p.page_id)} onChange={() => handlePageToggle(p.page_id)} />
+                    {p.page_name}
+                  </label>
+                ))}
               </div>
             )}
           </div>

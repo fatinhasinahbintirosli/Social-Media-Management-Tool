@@ -93,12 +93,12 @@ export default function SchedulerPage() {
   };
 
   const handlePageToggle = (pageId) => {
-    const stringId = String(pageId);
+    const targetId = String(pageId);
     setSelectedPages(prev => {
-      if (prev.includes(stringId)) {
-        return prev.filter(id => id !== stringId);
+      if (prev.includes(targetId)) {
+        return prev.filter(id => id !== targetId);
       } else {
-        return [...prev, stringId];
+        return [...prev, targetId];
       }
     });
   };
@@ -272,16 +272,21 @@ export default function SchedulerPage() {
               <p style={{ fontSize: '13px' }}>Memuatkan senarai page...</p>
             ) : (
               <div style={{ height: '140px', overflowY: 'auto', background: '#fff', padding: '10px', border: '1px solid #ccc', borderRadius: '6px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                {pages.map(p => (
-                  <label key={p.page_id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
-                    <input 
-                      type="checkbox" 
-                      checked={selectedPages.includes(String(p.page_id))} 
-                      onChange={() => handlePageToggle(p.page_id)} 
-                    />
-                    {p.page_name}
-                  </label>
-                ))}
+                {pages.map(p => {
+                  const currentId = String(p.page_id);
+                  const isChecked = selectedPages.includes(currentId);
+                  
+                  return (
+                    <label key={p.page_id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={isChecked} 
+                        onChange={() => handlePageToggle(p.page_id)} 
+                      />
+                      {p.page_name}
+                    </label>
+                  );
+                })}
               </div>
             )}
           </div>

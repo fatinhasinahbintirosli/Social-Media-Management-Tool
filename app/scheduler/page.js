@@ -80,17 +80,19 @@ export default function SchedulerPage() {
     if (selectedPages.length === pages.length) {
       setSelectedPages([]);
     } else {
-      setSelectedPages(pages.map(p => p.page_id));
+      setSelectedPages(pages.map(p => String(p.page_id)));
     }
   };
 
   const handlePageToggle = (pageId) => {
-    // Gunakan perbandingan longgar (==) untuk mengelakkan isu perbezaan string/number dari Supabase
-    if (selectedPages.some(id => id == pageId)) {
-      setSelectedPages(selectedPages.filter(id => id != pageId));
-    } else {
-      setSelectedPages([...selectedPages, pageId]);
-    }
+    const stringId = String(pageId);
+    setSelectedPages(prev => {
+      if (prev.includes(stringId)) {
+        return prev.filter(id => id !== stringId);
+      } else {
+        return [...prev, stringId];
+      }
+    });
   };
 
   const handleFileUpload = async (e, setUrlState) => {
@@ -119,7 +121,12 @@ export default function SchedulerPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (selectedPages.length === 0) return alert('Sila pilih sekurang-kurangnya satu Facebook Page.');
+    
+    // Semakan terus dari state terkini
+    if (!selectedPages || selectedPages.length === 0) {
+      alert('Ralat: Sila pilih sekurang-kurangnya satu Page.');
+      return;
+    }
 
     setLoading(true);
     
@@ -228,13 +235,14 @@ export default function SchedulerPage() {
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <button 
+            type="button"
             onClick={handleConnectFacebook}
             style={{ padding: '8px 14px', background: '#1877F2', color: '#fff', borderRadius: '6px', border: 'none', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
           >
             + Connect Facebook Page
           </button>
           <a href="/" style={{ padding: '8px 14px', background: '#6c757d', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontSize: '13px', fontWeight: 'bold' }}>🏠 Laman Utama</a>
-          <button onClick={handleLogout} style={{ padding: '8px 14px', background: '#dc3545', color: '#fff', borderRadius: '6px', border: 'none', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer' }}>🔒 Log Keluar</button>
+          <button type="button" onClick={handleLogout} style={{ padding: '8px 14px', background: '#dc3545', color: '#fff', borderRadius: '6px', border: 'none', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer' }}>🔒 Log Keluar</button>
         </div>
       </div>
 
@@ -259,7 +267,7 @@ export default function SchedulerPage() {
                   <label key={p.page_id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
                     <input 
                       type="checkbox" 
-                      checked={selectedPages.some(id => id == p.page_id)} 
+                      checked={selectedPages.includes(String(p.page_id))} 
                       onChange={() => handlePageToggle(p.page_id)} 
                     />
                     {p.page_name}

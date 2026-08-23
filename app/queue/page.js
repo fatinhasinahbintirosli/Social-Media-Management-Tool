@@ -136,16 +136,17 @@ export default function QueuePage() {
                     <td style={{ padding: '12px', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.message || '(Tiada teks)'}</td>
                     <td style={{ padding: '12px' }}>
                       {p.scheduled_at ? (() => {
-                        const d = new Date(new Date(p.scheduled_at).getTime() + (8 * 60 * 60 * 1000));
-                        const day = String(d.getUTCDate()).padStart(2, '0');
+                        const d = new Date(p.scheduled_at);
+                        const totalHours = d.getUTCHours() + 8;
+                        const day = d.getUTCDate() + (totalHours >= 24 ? 1 : 0);
                         const month = String(d.getUTCMonth() + 1).padStart(2, '0');
                         const year = d.getUTCFullYear();
-                        let hours = d.getUTCHours();
+                        let hours = totalHours % 24;
                         const minutes = String(d.getUTCMinutes()).padStart(2, '0');
                         const ampm = hours >= 12 ? 'PM' : 'AM';
                         hours = hours % 12;
                         hours = hours ? hours : 12;
-                        return `${day}/${month}/${year}, ${String(hours).padStart(2, '0')}:${minutes}:00 ${ampm}`;
+                        return `${String(day).padStart(2, '0')}/${month}/${year}, ${String(hours).padStart(2, '0')}:${minutes}:00 ${ampm}`;
                       })() : '-'}
                     </td>
                     <td style={{ padding: '12px' }}>

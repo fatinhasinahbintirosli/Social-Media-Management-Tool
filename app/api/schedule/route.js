@@ -15,7 +15,7 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Sila pilih sekurang-kurangnya satu Page.' }, { status: 400 });
     }
 
-    // Jika menggunakan auto-queue atau jadual manual (simpan terus dalam bentuk tatasusunan page_ids)
+    // Jika menggunakan auto-queue atau jadual manual
     if (scheduledAt === 'auto-queue' || (scheduledAt && new Date(scheduledAt) > new Date())) {
       const queueData = {
         page_ids: pageIds, // Menggunakan lajur page_ids yang betul mengikut schema database
@@ -24,7 +24,8 @@ export async function POST(request) {
         video_url: videoUrl,
         first_comment: firstComment,
         comment_image_url: commentImageUrl,
-        scheduled_at: scheduledAt === 'auto-queue' ? null : scheduledAt,
+        // Jika auto-queue, letakkan waktu semasa sementara menunggu cron job menyusunnya mengikut not-null constraint
+        scheduled_at: scheduledAt === 'auto-queue' ? new Date().toISOString() : scheduledAt,
         status: 'pending',
         profile: profile || 'Fatin'
       };

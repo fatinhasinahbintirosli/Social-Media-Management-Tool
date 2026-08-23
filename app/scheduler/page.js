@@ -92,7 +92,6 @@ export default function SchedulerPage() {
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`;
     
-    // Dikemaskini mengikut nama bucket di Supabase anda
     const { error } = await supabase.storage
       .from('social media management tool')
       .upload(fileName, file);
@@ -126,6 +125,14 @@ export default function SchedulerPage() {
       }
     }
 
+    // Laraskan masa jika mod 'now' dipilih
+    let finalScheduledAt = scheduledAt || null;
+    if (postMode === 'now') {
+      finalScheduledAt = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    } else if (postMode === 'auto') {
+      finalScheduledAt = 'auto-queue';
+    }
+
     const payload = {
       pageIds: selectedPages,
       message,
@@ -133,7 +140,7 @@ export default function SchedulerPage() {
       videoUrl: finalVideoUrl,
       firstComment: firstComment || null,
       commentImageUrl: commentImageUrl || null,
-      scheduledAt: postMode === 'auto' ? 'auto-queue' : (scheduledAt || null),
+      scheduledAt: finalScheduledAt,
       profile: currentProfile,
     };
 
@@ -146,6 +153,12 @@ export default function SchedulerPage() {
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
+
+      // JIKA PILIH 'POS SEKARANG': Pemicu automatik API cron serta-merta
+      if (postMode === 'now') {
+        await fetch('/api/cron/process-posts');
+      }
+
       alert(data.message || 'Berjaya!');
       
       setMessage(''); 

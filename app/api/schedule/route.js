@@ -29,6 +29,7 @@ export async function POST(request) {
     }
 
     let targetScheduledTime = null;
+    let isImmediatePost = false;
 
     if (scheduledAt) {
       if (scheduledAt === 'auto-queue') {
@@ -139,16 +140,21 @@ export async function POST(request) {
           return NextResponse.json({ error: 'Format masa jadual tidak sah.' }, { status: 400 });
         }
         targetScheduledTime = parsedDate.toISOString();
+        
+        // Semak jika masa manual dimasukkan untuk masa sekarang/lalu
+        if (parsedDate <= new Date()) {
+          isImmediatePost = true;
+        }
       }
     } else {
+      // Pilihan 'Pos Sekarang'
       targetScheduledTime = new Date().toISOString();
+      isImmediatePost = true;
     }
 
-    // Tetapkan status kepada 'pending' untuk semua jenis pos (termasuk Post Now)
-    // supaya sistem cron dapat memproses dan menghantarnya terus ke Facebook.
     const postStatus = 'pending';
 
-    // Masukkan ke dalam database
+    // 1. Simpan hantaran ke pangkalan data
     const { error: insertError } = await supabase.from('scheduled_posts').insert({
       page_ids: pageIds,
       message: message || '',
@@ -165,9 +171,23 @@ export async function POST(request) {
       return NextResponse.json({ error: `Gagal menjadualkan pos: ${insertError.message}` }, { status: 500 });
     }
 
+    // 2. Jika ini hantaran 'Pos Sekarang', terus pemicu API runner
+    if (isImmediatePost) {
+      const host = request.headers.get('host');
+      const protocol = request.headers.get('x-forwarded-proto') || 'https';
+      
+      // Dipanggil secara asynchronous di bahagian belakang
+      fetch(`${protocol}://${host}/api/cron/process-posts`, {
+        method: 'GET',
+        headers: { 'Cache-Control': 'no-cache' }
+      }).catch((err) => console.error('Ralat pemicu automatik process-posts:', err));
+    }
+
     return NextResponse.json({ 
       success: true, 
-      message: `Pos berjaya dihantar/dijadualkan (${activeProfile})!` 
+      message: isImmediatePost 
+        ? `Pos sedang dihantar ke Facebook (${activeProfile})...` 
+        : `Pos berjaya dijadualkan (${activeProfile})!` 
     }, { status: 200 });
 
   } catch (error) {

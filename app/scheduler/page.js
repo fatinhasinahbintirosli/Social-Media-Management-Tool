@@ -12,7 +12,7 @@ export default function SchedulerPage() {
   const CORRECT_PASSWORD = 'mohdfadliselangor1';
 
   const [pages, setPages] = useState([]);
-  const [selectedPages, setSelectedPages] = useState([]);
+  const [selectedIndices, setSelectedIndices] = useState([]); // Menggunakan index untuk elak isu string/int id
   const [message, setMessage] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [commentImageUrl, setCommentImageUrl] = useState('');
@@ -47,6 +47,7 @@ export default function SchedulerPage() {
       if (error) {
         console.error('Ralat ambil pages:', error.message);
       } else {
+        console.log("Data Pages dari Supabase:", pData);
         setPages(pData || []);
       }
       setFetchingPages(false);
@@ -85,20 +86,19 @@ export default function SchedulerPage() {
   };
 
   const handleSelectAll = () => {
-    if (selectedPages.length === pages.length) {
-      setSelectedPages([]);
+    if (selectedIndices.length === pages.length) {
+      setSelectedIndices([]);
     } else {
-      setSelectedPages(pages.map(p => String(p.page_id)));
+      setSelectedIndices(pages.map((_, index) => index));
     }
   };
 
-  const handlePageToggle = (pageId) => {
-    const targetId = String(pageId);
-    setSelectedPages(prev => {
-      if (prev.includes(targetId)) {
-        return prev.filter(id => id !== targetId);
+  const handleIndexToggle = (index) => {
+    setSelectedIndices(prev => {
+      if (prev.includes(index)) {
+        return prev.filter(i => i !== index);
       } else {
-        return [...prev, targetId];
+        return [...prev, index];
       }
     });
   };
@@ -130,9 +130,13 @@ export default function SchedulerPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    console.log("Senarai page terpilih:", selectedPages);
+    // Tukar index terpilih kepada page_id sebenar
+    const selectedPageIds = selectedIndices.map(index => String(pages[index].page_id));
 
-    if (!selectedPages || selectedPages.length === 0) {
+    console.log("Index terpilih:", selectedIndices);
+    console.log("Senarai Page ID dihantar:", selectedPageIds);
+
+    if (!selectedPageIds || selectedPageIds.length === 0) {
       alert('Ralat: Sila pilih sekurang-kurangnya satu Page.');
       return;
     }
@@ -158,7 +162,7 @@ export default function SchedulerPage() {
     }
 
     const payload = {
-      pageIds: selectedPages,
+      pageIds: selectedPageIds,
       message,
       imageUrl: finalImageUrl,
       videoUrl: finalVideoUrl,
@@ -188,6 +192,7 @@ export default function SchedulerPage() {
       setImageUrl(''); 
       setFirstComment(''); 
       setCommentImageUrl('');
+      setSelectedIndices([]);
     } catch (err) {
       alert(`Ralat: ${err.message}`);
     } finally {
@@ -263,25 +268,24 @@ export default function SchedulerPage() {
           
           <div style={{ marginBottom: '20px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <label style={{ fontWeight: 'bold' }}>Pilih Pages ({selectedPages.length}/{pages.length}):</label>
+              <label style={{ fontWeight: 'bold' }}>Pilih Pages ({selectedIndices.length}/{pages.length}):</label>
               <button type="button" onClick={handleSelectAll} style={{ fontSize: '12px', background: 'none', border: 'none', color: '#1877f2', cursor: 'pointer', textDecoration: 'underline' }}>
-                {selectedPages.length === pages.length ? 'Nyahpilih Semua' : 'Pilih Semua'}
+                {selectedIndices.length === pages.length ? 'Nyahpilih Semua' : 'Pilih Semua'}
               </button>
             </div>
             {fetchingPages ? (
               <p style={{ fontSize: '13px' }}>Memuatkan senarai page...</p>
             ) : (
               <div style={{ height: '140px', overflowY: 'auto', background: '#fff', padding: '10px', border: '1px solid #ccc', borderRadius: '6px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                {pages.map(p => {
-                  const currentId = String(p.page_id);
-                  const isChecked = selectedPages.includes(currentId);
+                {pages.map((p, index) => {
+                  const isChecked = selectedIndices.includes(index);
                   
                   return (
-                    <label key={p.page_id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
+                    <label key={p.page_id || index} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
                       <input 
                         type="checkbox" 
                         checked={isChecked} 
-                        onChange={() => handlePageToggle(p.page_id)} 
+                        onChange={() => handleIndexToggle(index)} 
                       />
                       {p.page_name}
                     </label>

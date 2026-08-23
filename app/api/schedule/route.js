@@ -1,7 +1,7 @@
 // app/api/schedule/route.js
 
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase } from '../../../lib/supabaseClient';
 
 export async function POST(request) {
   try {
@@ -23,7 +23,7 @@ export async function POST(request) {
       );
     }
 
-    // 🔴 BUANG PAGE DUPLIKAT (Mengelakkan posting berulang untuk page yang sama)
+    // 🔴 BUANG PAGE DUPLIKAT (Pembersihan backend)
     const uniquePages = Array.from(
       new Map(pages.map(item => [item.page_id, item])).values()
     );
@@ -61,7 +61,7 @@ export async function POST(request) {
 
         const postId = fbData.id || fbData.post_id;
 
-        // Post First Comment jika disediakan
+        // Post First Comment jika ada
         if (firstComment || commentImageUrl) {
           await postFirstComment(postId, access_token, firstComment, commentImageUrl);
         }
@@ -101,7 +101,6 @@ export async function POST(request) {
           throw new Error(`[${page_id}] FB Schedule Error: ${fbData.error.message}`);
         }
 
-        // Simpan First Comment ke database untuk dieksekusi semasa jadual dipublish
         if (firstComment || commentImageUrl) {
           await supabase.from('scheduled_comments').insert({
             page_id,
@@ -139,7 +138,7 @@ export async function POST(request) {
       }
     });
 
-    // PARALLEL EXECUTION: Jalankan kesemua panggilan API serentak
+    // PARALLEL EXECUTION
     const results = await Promise.allSettled(postPromises);
 
     const successful = results
@@ -164,7 +163,7 @@ export async function POST(request) {
   }
 }
 
-// Helper Function untuk First Comment
+// Helper Function First Comment
 async function postFirstComment(postId, accessToken, commentText, commentImageUrl) {
   try {
     let commentPayload = { access_token: accessToken };
@@ -178,6 +177,6 @@ async function postFirstComment(postId, accessToken, commentText, commentImageUr
       body: JSON.stringify(commentPayload),
     });
   } catch (err) {
-    console.error(`Gagal hantar First Comment pada post ${postId}:`, err);
+    console.error(`Gagal First Comment post ${postId}:`, err);
   }
 }

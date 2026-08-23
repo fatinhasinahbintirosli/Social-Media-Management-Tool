@@ -15,28 +15,43 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Sila pilih sekurang-kurangnya satu Page.' }, { status: 400 });
     }
 
-    // Jika menggunakan auto-queue atau jadual manual
+    // 1. MOD AUTO-QUEUE / JADUAL MANUAL (Menggunakan Promise.allSettled)
     if (scheduledAt === 'auto-queue' || (scheduledAt && new Date(scheduledAt) > new Date())) {
-      const queueData = {
-        page_ids: pageIds, // Menggunakan lajur page_ids yang betul mengikut schema database
-        message,
-        image_url: imageUrl,
-        video_url: videoUrl,
-        first_comment: firstComment,
-        comment_image_url: commentImageUrl,
-        // Jika auto-queue, letakkan waktu semasa sementara menunggu cron job menyusunnya mengikut not-null constraint
-        scheduled_at: scheduledAt === 'auto-queue' ? new Date().toISOString() : scheduledAt,
-        status: 'pending',
-        profile: profile || 'Fatin'
-      };
+      const results = await Promise.allSettled(
+        pageIds.map(async (pageId) => {
+          const queueData = {
+            page_ids: [pageId], // Simpan sebagai tatasusunan untuk setiap page
+            message,
+            image_url: imageUrl,
+            video_url: videoUrl,
+            first_comment: firstComment,
+            comment_image_url: commentImageUrl,
+            scheduled_at: scheduledAt === 'auto-queue' ? new Date().toISOString() : scheduledAt,
+            status: 'pending',
+            profile: profile || 'Fatin'
+          };
 
-      const { error } = await supabase.from('scheduled_posts').insert([queueData]);
-      if (error) throw new Error(error.message);
+          const { error } = await supabase.from('scheduled_posts').insert([queueData]);
+          if (error) throw new Error(error.message);
 
-      return NextResponse.json({ success: true, message: 'Berjaya dimasukkan ke dalam senarai queue!' });
+          return { pageId, success: true };
+        })
+      );
+
+      const failures = results.filter(r => r.status === 'rejected');
+      if (failures.length > 0 && failures.length === pageIds.length) {
+        throw new Error(failures[0].reason.message || 'Gagal memasukkan ke dalam senarai queue.');
+      }
+
+      return NextResponse.json({ 
+        success: true, 
+        message: failures.length > 0 
+          ? `Berjaya dimasukkan ke sesetengah queue (${pageIds.length - failures.length}/${pageIds.length}).` 
+          : 'Berjaya dimasukkan ke dalam senarai queue untuk semua Page terpilih!' 
+      });
     }
 
-    // Jika pos terus (pos sekarang) menggunakan Promise.allSettled
+    // 2. MOD POS SEKARANG (Menggunakan Promise.allSettled untuk hantar ke Facebook)
     const results = await Promise.allSettled(
       pageIds.map(async (pageId) => {
         const { data: pageData, error: pageError } = await supabase

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '../../../../lib/supabaseClient';
+import { supabase } from '../../../../../lib/supabaseClient';
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
@@ -54,7 +54,7 @@ export async function GET(request) {
       }
     }
 
-    // Redirect pengguna kembali ke halaman utama
+    // Redirect pengguna kembali ke halaman utama selepas berjaya
     return NextResponse.redirect(`${origin}/?status=success`);
 
   } catch (error) {

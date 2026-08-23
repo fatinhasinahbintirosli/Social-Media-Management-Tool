@@ -1,64 +1,75 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '../../../../../lib/supabaseClient';
+import { createClient } from '@supabase/supabase-js';
 
 export async function GET(request) {
-  const { searchParams } = new URL(request.url);
+  const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
-  const origin = new URL(request.url).origin;
+  const error = searchParams.get('error');
 
-  if (!code) {
-    return NextResponse.json({ error: 'No code provided' }, { status: 400 });
+  // 1. Semak jika pengguna membatalkan keizinan atau terdapat ralat dari Facebook
+  if (error || !code) {
+    return NextResponse.redirect(`${origin}/scheduler?status=error&message=${encodeURIComponent(error || 'No code provided')}`);
   }
 
-  try {
-    const appId = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID;
-    const appSecret = process.env.FACEBOOK_APP_SECRET;
-    const redirectUri = `${origin}/api/auth/facebook/callback`;
+  const appId = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID;
+  const appSecret = process.env.FACEBOOK_APP_SECRET;
+  const redirectUri = `${origin}/api/auth/facebook/callback`;
 
-    // 1. Tukar 'code' kepada Short-lived Access Token
-    const tokenRes = await fetch(
-      `https://graph.facebook.com/v19.0/oauth/access_token?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${appSecret}&code=${code}`
-    );
+  try {
+    // 2. Tukar authorization code kepada User Access Token
+    const tokenUrl = `https://graph.facebook.com/v19.0/oauth/access_token?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${appSecret}&code=${code}`;
+    const tokenRes = await fetch(tokenUrl);
     const tokenData = await tokenRes.json();
 
     if (tokenData.error) {
-      throw new Error(tokenData.error.message || 'Gagal mendapatkan token daripada Facebook');
+      throw new Error(tokenData.error.message);
     }
 
-    const shortLivedToken = tokenData.access_token;
+    const userAccessToken = tokenData.access_token;
 
-    // 2. Tukar kepada Long-lived Access Token (Sah sehingga 60 hari)
-    const longLivedRes = await fetch(
-      `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${shortLivedToken}`
-    );
-    const longLivedData = await longLivedRes.json();
-    const userAccessToken = longLivedData.access_token || shortLivedToken;
-
-    // 3. Tarik senarai Facebook Pages milik pengguna
-    const pagesRes = await fetch(`https://graph.facebook.com/v19.0/me/accounts?access_token=${userAccessToken}`);
+    // 3. Ambil senarai Facebook Pages yang diuruskan oleh pengguna berserta Long-Lived Page Access Token
+    const pagesUrl = `https://graph.facebook.com/v19.0/me/accounts?access_token=${userAccessToken}`;
+    const pagesRes = await fetch(pagesUrl);
     const pagesData = await pagesRes.json();
 
     if (pagesData.error) {
-      throw new Error(pagesData.error.message || 'Gagal menarik senarai Facebook Pages');
+      throw new Error(pagesData.error.message);
     }
 
-    // 4. Simpan senarai Page ke jadual facebook_pages di Supabase
-    if (pagesData.data && pagesData.data.length > 0) {
-      for (const page of pagesData.data) {
-        await supabase.from('facebook_pages').upsert({
+    const pages = pagesData.data || [];
+
+    if (pages.length === 0) {
+      return NextResponse.redirect(`${origin}/scheduler?status=error&message=${encodeURIComponent('Tiada Facebook Page dijumpai untuk akaun ini.')}`);
+    }
+
+    // 4. Inisialisasi Supabase Client
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    );
+
+    // 5. Simpan/Kemaskini senarai Pages dan Token ke dalam pangkalan data Supabase
+    for (const page of pages) {
+      const { error: dbError } = await supabase
+        .from('pages')
+        .upsert({
           page_id: page.id,
           page_name: page.name,
           access_token: page.access_token,
-          category: page.category || 'General'
+          category: page.category || null,
+          updated_at: new Date().toISOString(),
         }, { onConflict: 'page_id' });
+
+      if (dbError) {
+        console.error(`Ralat menyimpan page ${page.name}:`, dbError.message);
       }
     }
 
-    // Redirect pengguna kembali ke halaman utama selepas berjaya
-    return NextResponse.redirect(`${origin}/?status=success`);
+    // 6. Lencongkan (*Redirect*) semula pengguna ke Halaman Scheduler
+    return NextResponse.redirect(`${origin}/scheduler?status=success`);
 
-  } catch (error) {
-    console.error('Facebook Auth Error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (err) {
+    console.error('Facebook Auth Callback Error:', err.message);
+    return NextResponse.redirect(`${origin}/scheduler?status=error&message=${encodeURIComponent(err.message)}`);
   }
 }

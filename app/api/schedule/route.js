@@ -12,6 +12,15 @@ function getLocalISOString() {
   return malaysianTime.toISOString().replace('Z', '+08:00');
 }
 
+// Fungsi untuk menstabilkan masa manual supaya tidak lari zon masa UTC
+function adjustManualTime(dateString) {
+  if (!dateString) return null;
+  const date = new Date(dateString);
+  // Tambah balik 8 jam jika frontend menghantarnya dalam bentuk UTC
+  date.setHours(date.getHours() + 8);
+  return date.toISOString().replace('Z', '+08:00');
+}
+
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -21,16 +30,18 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Sila pilih sekurang-kurangnya satu Page.' }, { status: 400 });
     }
 
-    // 1. MOD AUTO-QUEUE / JADUAL MANUAL (Simpan sebagai 1 baris rekod tunggal yang mengandungi semua pageIds)
+    // 1. MOD AUTO-QUEUE / JADUAL MANUAL
     if (scheduledAt === 'auto-queue' || (scheduledAt && new Date(scheduledAt) > new Date())) {
+      const finalScheduledAt = scheduledAt === 'auto-queue' ? getLocalISOString() : adjustManualTime(scheduledAt);
+
       const queueData = {
-        page_ids: pageIds, // Simpan terus senarai tatasusunan (array) pageIds dalam 1 baris
+        page_ids: pageIds, 
         message,
         image_url: imageUrl,
         video_url: videoUrl,
         first_comment: firstComment,
         comment_image_url: commentImageUrl,
-        scheduled_at: scheduledAt === 'auto-queue' ? getLocalISOString() : scheduledAt,
+        scheduled_at: finalScheduledAt,
         status: 'pending',
         profile: profile || 'Fatin'
       };
@@ -41,7 +52,7 @@ export async function POST(request) {
       return NextResponse.json({ success: true, message: 'Berjaya dimasukkan ke dalam senarai queue sebagai satu hantaran!' });
     }
 
-    // 2. MOD POS SEKARANG (Hantar ke Facebook secara selari untuk setiap Page)
+    // 2. MOD POS SEKARANG
     const results = await Promise.allSettled(
       pageIds.map(async (pageId) => {
         const { data: pageData, error: pageError } = await supabase

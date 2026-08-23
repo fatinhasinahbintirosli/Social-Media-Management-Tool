@@ -84,14 +84,17 @@ export default function SchedulerPage() {
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`;
     
+    // Dikemas kini menggunakan nama bucket sebenar dari Supabase Dashboard anda
     const { error } = await supabase.storage
-      .from('post-media')
+      .from('social media management tool')
       .upload(fileName, file);
 
     if (error) {
       alert('Gagal memuat naik fail: ' + error.message);
     } else {
-      const { data: publicUrlData } = supabase.storage.from('post-media').getPublicUrl(fileName);
+      const { data: publicUrlData } = supabase.storage
+        .from('social media management tool')
+        .getPublicUrl(fileName);
       setUrlState(publicUrlData.publicUrl);
     }
     setFileUploading(false);
@@ -114,7 +117,6 @@ export default function SchedulerPage() {
       }
     }
 
-    // PENTING: Laraskan masa manual supaya mengekalkan waktu tempatan yang dipilih
     let formattedScheduledAt = null;
     if (postMode === 'manual' && scheduledAt) {
       const localDate = new Date(scheduledAt);
@@ -203,7 +205,6 @@ export default function SchedulerPage() {
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
           <Link href="/queue-settings" style={{ padding: '8px 14px', background: '#333', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontSize: '13px', fontWeight: 'bold' }}>⚙️ Update Time Slots ({currentProfile})</Link>
           
-          {/* Butang Lihat Senarai Queue menggunakan Link Next.js dengan zIndex untuk pastikan boleh ditekan */}
           <Link 
             href="/queue" 
             style={{ 

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase } from '../../../../lib/supabaseClient';
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
@@ -20,6 +20,11 @@ export async function GET(request) {
       `https://graph.facebook.com/v19.0/oauth/access_token?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${appSecret}&code=${code}`
     );
     const tokenData = await tokenRes.json();
+
+    if (tokenData.error) {
+      throw new Error(tokenData.error.message || 'Gagal mendapatkan token daripada Facebook');
+    }
+
     const shortLivedToken = tokenData.access_token;
 
     // 2. Tukar kepada Long-lived Access Token (Sah sehingga 60 hari)
@@ -27,26 +32,30 @@ export async function GET(request) {
       `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${shortLivedToken}`
     );
     const longLivedData = await longLivedRes.json();
-    const userAccessToken = longLivedData.access_token;
+    const userAccessToken = longLivedData.access_token || shortLivedToken;
 
     // 3. Tarik senarai Facebook Pages milik pengguna
     const pagesRes = await fetch(`https://graph.facebook.com/v19.0/me/accounts?access_token=${userAccessToken}`);
     const pagesData = await pagesRes.json();
 
-    // 4. Simpan senarai Page ke pangkalan data Supabase
-    if (pagesData.data) {
+    if (pagesData.error) {
+      throw new Error(pagesData.error.message || 'Gagal menarik senarai Facebook Pages');
+    }
+
+    // 4. Simpan senarai Page ke jadual facebook_pages di Supabase
+    if (pagesData.data && pagesData.data.length > 0) {
       for (const page of pagesData.data) {
         await supabase.from('facebook_pages').upsert({
           page_id: page.id,
           page_name: page.name,
-          access_token: page.access_token, // Page Access Token ini tidak akan tamat tempoh jika diambil guna Long-lived User Token
-          category: page.category
+          access_token: page.access_token,
+          category: page.category || 'General'
         }, { onConflict: 'page_id' });
       }
     }
 
-    // Redirect pengguna kembali ke halaman senarai akaun di sistem anda
-    return NextResponse.redirect(`${origin}/add-account?status=success`);
+    // Redirect pengguna kembali ke halaman utama atau halaman add-account
+    return NextResponse.redirect(`${origin}/?status=success`);
 
   } catch (error) {
     console.error('Facebook Auth Error:', error);

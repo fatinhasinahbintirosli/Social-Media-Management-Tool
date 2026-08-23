@@ -12,15 +12,6 @@ function getLocalISOString() {
   return malaysianTime.toISOString().replace('Z', '+08:00');
 }
 
-// Fungsi untuk menstabilkan masa manual supaya tidak lari zon masa UTC
-function adjustManualTime(dateString) {
-  if (!dateString) return null;
-  const date = new Date(dateString);
-  // Tambah balik 8 jam jika frontend menghantarnya dalam bentuk UTC
-  date.setHours(date.getHours() + 8);
-  return date.toISOString().replace('Z', '+08:00');
-}
-
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -32,7 +23,8 @@ export async function POST(request) {
 
     // 1. MOD AUTO-QUEUE / JADUAL MANUAL
     if (scheduledAt === 'auto-queue' || (scheduledAt && new Date(scheduledAt) > new Date())) {
-      const finalScheduledAt = scheduledAt === 'auto-queue' ? getLocalISOString() : adjustManualTime(scheduledAt);
+      // Jika auto-queue guna waktu tempatan, jika jadual manual guna terus nilai scheduledAt dari borang tanpa ubah
+      const finalScheduledAt = scheduledAt === 'auto-queue' ? getLocalISOString() : scheduledAt;
 
       const queueData = {
         page_ids: pageIds, 

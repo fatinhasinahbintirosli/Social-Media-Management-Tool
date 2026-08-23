@@ -6,10 +6,8 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
-// Fungsi pembantu untuk mendapatkan masa tempatan Malaysia yang tepat (UTC+8)
 function getLocalISOString() {
   const now = new Date();
-  // Anjakkan masa kepada zon masa Malaysia (+8 jam)
   const malaysianTime = new Date(now.getTime() + (8 * 60 * 60 * 1000));
   return malaysianTime.toISOString().replace('Z', '+08:00');
 }
@@ -23,44 +21,27 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Sila pilih sekurang-kurangnya satu Page.' }, { status: 400 });
     }
 
-    // 1. MOD AUTO-QUEUE / JADUAL MANUAL (Menggunakan Promise.allSettled)
+    // 1. MOD AUTO-QUEUE / JADUAL MANUAL (Simpan sebagai 1 baris rekod tunggal yang mengandungi semua pageIds)
     if (scheduledAt === 'auto-queue' || (scheduledAt && new Date(scheduledAt) > new Date())) {
-      const results = await Promise.allSettled(
-        pageIds.map(async (pageId) => {
-          const queueData = {
-            page_ids: [pageId], 
-            message,
-            image_url: imageUrl,
-            video_url: videoUrl,
-            first_comment: firstComment,
-            comment_image_url: commentImageUrl,
-            // Gunakan fungsi masa tempatan Malaysia jika auto-queue
-            scheduled_at: scheduledAt === 'auto-queue' ? getLocalISOString() : scheduledAt,
-            status: 'pending',
-            profile: profile || 'Fatin'
-          };
+      const queueData = {
+        page_ids: pageIds, // Simpan terus senarai tatasusunan (array) pageIds dalam 1 baris
+        message,
+        image_url: imageUrl,
+        video_url: videoUrl,
+        first_comment: firstComment,
+        comment_image_url: commentImageUrl,
+        scheduled_at: scheduledAt === 'auto-queue' ? getLocalISOString() : scheduledAt,
+        status: 'pending',
+        profile: profile || 'Fatin'
+      };
 
-          const { error } = await supabase.from('scheduled_posts').insert([queueData]);
-          if (error) throw new Error(error.message);
+      const { error } = await supabase.from('scheduled_posts').insert([queueData]);
+      if (error) throw new Error(error.message);
 
-          return { pageId, success: true };
-        })
-      );
-
-      const failures = results.filter(r => r.status === 'rejected');
-      if (failures.length > 0 && failures.length === pageIds.length) {
-        throw new Error(failures[0].reason.message || 'Gagal memasukkan ke dalam senarai queue.');
-      }
-
-      return NextResponse.json({ 
-        success: true, 
-        message: failures.length > 0 
-          ? `Berjaya dimasukkan ke sesetengah queue (${pageIds.length - failures.length}/${pageIds.length}).` 
-          : 'Berjaya dimasukkan ke dalam senarai queue untuk semua Page terpilih!' 
-      });
+      return NextResponse.json({ success: true, message: 'Berjaya dimasukkan ke dalam senarai queue sebagai satu hantaran!' });
     }
 
-    // 2. MOD POS SEKARANG (Menggunakan Promise.allSettled untuk hantar ke Facebook)
+    // 2. MOD POS SEKARANG (Hantar ke Facebook secara selari untuk setiap Page)
     const results = await Promise.allSettled(
       pageIds.map(async (pageId) => {
         const { data: pageData, error: pageError } = await supabase

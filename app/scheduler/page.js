@@ -80,16 +80,16 @@ export default function SchedulerPage() {
     if (selectedPages.length === pages.length) {
       setSelectedPages([]);
     } else {
-      setSelectedPages(pages.map(p => String(p.page_id)));
+      setSelectedPages(pages.map(p => p.page_id));
     }
   };
 
   const handlePageToggle = (pageId) => {
-    const stringId = String(pageId);
-    if (selectedPages.includes(stringId)) {
-      setSelectedPages(selectedPages.filter(id => id !== stringId));
+    // Gunakan perbandingan longgar (==) untuk mengelakkan isu perbezaan string/number dari Supabase
+    if (selectedPages.some(id => id == pageId)) {
+      setSelectedPages(selectedPages.filter(id => id != pageId));
     } else {
-      setSelectedPages([...selectedPages, stringId]);
+      setSelectedPages([...selectedPages, pageId]);
     }
   };
 
@@ -259,7 +259,7 @@ export default function SchedulerPage() {
                   <label key={p.page_id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
                     <input 
                       type="checkbox" 
-                      checked={selectedPages.includes(String(p.page_id))} 
+                      checked={selectedPages.some(id => id == p.page_id)} 
                       onChange={() => handlePageToggle(p.page_id)} 
                     />
                     {p.page_name}

@@ -3,6 +3,9 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
+// Fungsi bantuan delay
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export async function GET() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -49,39 +52,24 @@ export async function GET() {
         }
 
         try {
-          let targetIdForComment = null;
+          let targetPostId = null;
 
-          // A) HANTAR GAMBAR UTAMA (Guna /feed supaya post_id betul untuk komen)
+          // A) HANTAR GAMBAR UTAMA
           if (post.image_url) {
-            const fbRes = await fetch(`https://graph.facebook.com/v19.0/${pageId}/feed`, {
+            const fbRes = await fetch(`https://graph.facebook.com/v19.0/${pageId}/photos`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                message: post.message || '',
-                link: post.image_url, // Gunakan parameter link / picture
-                picture: post.image_url,
+                url: post.image_url,
+                caption: post.message || '',
                 access_token: accessToken,
               }),
             });
             const fbData = await fbRes.json();
+            if (fbData.error) throw new Error(`Media Error: ${fbData.error.message}`);
             
-            // Jika /feed tidak menyokong direct upload url, fallback ke /photos
-            if (fbData.error) {
-              const photoRes = await fetch(`https://graph.facebook.com/v19.0/${pageId}/photos`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  url: post.image_url,
-                  caption: post.message || '',
-                  access_token: accessToken,
-                }),
-              });
-              const photoData = await photoRes.json();
-              if (photoData.error) throw new Error(`Media Error: ${photoData.error.message}`);
-              targetIdForComment = photoData.post_id || photoData.id;
-            } else {
-              targetIdForComment = fbData.id;
-            }
+            // Facebook memulangkan post_id (id post luaran) atau id photo
+            targetPostId = fbData.post_id || fbData.id;
           } 
           // B) HANTAR VIDEO UTAMA
           else if (post.video_url) {
@@ -96,7 +84,7 @@ export async function GET() {
             });
             const fbData = await fbRes.json();
             if (fbData.error) throw new Error(`Video Error: ${fbData.error.message}`);
-            targetIdForComment = fbData.id;
+            targetPostId = fbData.id;
           } 
           // C) HANTAR TEKS SAHAJA
           else {
@@ -110,29 +98,46 @@ export async function GET() {
             });
             const fbData = await fbRes.json();
             if (fbData.error) throw new Error(`Feed Error: ${fbData.error.message}`);
-            targetIdForComment = fbData.id;
+            targetPostId = fbData.id;
           }
 
-          // D) HANTAR FIRST COMMENT DENGAN LENGKAP
-          if (targetIdForComment && (post.first_comment || post.comment_image_url)) {
-            const commentBody = { access_token: accessToken };
-            
+          // D) HANTAR FIRST COMMENT (Tunggu 2 saat supaya ID bersedia di Facebook Graph)
+          if (targetPostId && (post.first_comment || post.comment_image_url)) {
+            await sleep(2000); // Penangguhan 2 saat
+
+            const commentPayload = { access_token: accessToken };
             if (post.first_comment) {
-              commentBody.message = post.first_comment;
+              commentPayload.message = post.first_comment;
             }
             if (post.comment_image_url) {
-              commentBody.attachment_url = post.comment_image_url;
+              commentPayload.attachment_url = post.comment_image_url;
             }
 
-            const commentRes = await fetch(`https://graph.facebook.com/v19.0/${targetIdForComment}/comments`, {
+            const commentRes = await fetch(`https://graph.facebook.com/v19.0/${targetPostId}/comments`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(commentBody),
+              body: JSON.stringify(commentPayload),
             });
 
             const commentData = await commentRes.json();
+
+            // Jika masih gagal guna post_id, cuba post terus menggunakan id asas
             if (commentData.error) {
-              console.error('Gagal hantar first comment:', commentData.error.message);
+              console.warn('Pertama gagal, mencuba fallback comment:', commentData.error.message);
+              
+              // Padamkan attachment_url jika ia yang menyebabkan ralat Facebook
+              delete commentPayload.attachment_url;
+              if (post.first_comment) {
+                const retryRes = await fetch(`https://graph.facebook.com/v19.0/${targetPostId}/comments`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(commentPayload),
+                });
+                const retryData = await retryRes.json();
+                if (retryData.error) {
+                  console.error('Komen gagal sepenuhnya:', retryData.error.message);
+                }
+              }
             }
           }
 
@@ -142,7 +147,7 @@ export async function GET() {
         }
       }
 
-      // Kemas kini status
+      // Kemas kini status dalam database Supabase
       if (hasError) {
         await supabase
           .from('scheduled_posts')

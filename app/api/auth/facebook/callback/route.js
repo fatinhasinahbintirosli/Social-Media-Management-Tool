@@ -54,7 +54,7 @@ export async function GET(request) {
       }
     }
 
-    // Redirect pengguna kembali ke halaman utama atau halaman add-account
+    // Redirect pengguna kembali ke halaman utama
     return NextResponse.redirect(`${origin}/?status=success`);
 
   } catch (error) {

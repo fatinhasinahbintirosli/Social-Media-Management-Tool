@@ -3,10 +3,8 @@
 import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 
 export default function SchedulerPage() {
-  const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState(false);
@@ -202,17 +200,29 @@ export default function SchedulerPage() {
       </div>
 
       <div style={{ marginBottom: '20px', display: 'flex', gap: '10px', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
           <Link href="/queue-settings" style={{ padding: '8px 14px', background: '#333', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontSize: '13px', fontWeight: 'bold' }}>⚙️ Update Time Slots ({currentProfile})</Link>
           
-          {/* Butang Lihat Senarai Queue menggunakan router.push */}
-          <button 
-            type="button" 
-            onClick={() => router.push('/queue')} 
-            style={{ padding: '8px 14px', background: '#1877f2', color: '#fff', borderRadius: '6px', border: 'none', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer' }}
+          {/* Butang Lihat Senarai Queue menggunakan Link Next.js dengan zIndex untuk pastikan boleh ditekan */}
+          <Link 
+            href="/queue" 
+            style={{ 
+              display: 'inline-flex', 
+              alignItems: 'center', 
+              padding: '8px 14px', 
+              background: '#1877f2', 
+              color: '#fff', 
+              borderRadius: '6px', 
+              textDecoration: 'none', 
+              fontSize: '13px', 
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              zIndex: 10,
+              position: 'relative'
+            }}
           >
             📋 Lihat Senarai Queue
-          </button>
+          </Link>
         </div>
 
         <div style={{ display: 'flex', gap: '10px' }}>

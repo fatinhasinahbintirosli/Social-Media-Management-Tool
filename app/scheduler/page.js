@@ -39,8 +39,16 @@ export default function SchedulerPage() {
     setCurrentProfile(savedProfile);
 
     async function initData() {
-      const { data: pData } = await supabase.from('pages').select('page_id, page_name').order('page_name', { ascending: true });
-      setPages(pData || []);
+      const { data: pData, error } = await supabase
+        .from('pages')
+        .select('page_id, page_name')
+        .order('page_name', { ascending: true });
+        
+      if (error) {
+        console.error('Ralat ambil pages:', error.message);
+      } else {
+        setPages(pData || []);
+      }
       setFetchingPages(false);
     }
     initData();
@@ -122,7 +130,8 @@ export default function SchedulerPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    // Semakan terus dari state terkini
+    console.log("Senarai page terpilih:", selectedPages);
+
     if (!selectedPages || selectedPages.length === 0) {
       alert('Ralat: Sila pilih sekurang-kurangnya satu Page.');
       return;

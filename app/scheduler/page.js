@@ -184,7 +184,6 @@ export default function SchedulerPage() {
     );
   }
 
-  // Semak sama ada URL media utama adalah video atau gambar
   const isVideo = imageUrl.toLowerCase().endsWith('.mp4') || imageUrl.includes('video') || imageUrl.includes('.mov') || imageUrl.includes('.webm');
 
   return (
@@ -195,7 +194,7 @@ export default function SchedulerPage() {
         <div><strong>👤 Profil Pengguna Semasa:</strong> {currentProfile}</div>
         <div style={{ display: 'flex', gap: '10px' }}>
           <button type="button" onClick={() => handleProfileChange('Fatin')} style={{ padding: '6px 12px', background: currentProfile === 'Fatin' ? '#0d6efd' : '#fff', color: currentProfile === 'Fatin' ? '#fff' : '#000', borderRadius: '5px', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Profil Fatin</button>
-          <button type="button" onClick={() => handleProfileChange('Adik')} style={{ padding: '6px 12px', background currentProfile === 'Adik' ? '#198754' : '#fff', color: currentProfile === 'Adik' ? '#fff' : '#000', borderRadius: '5px', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Profil Adik</button>
+          <button type="button" onClick={() => handleProfileChange('Adik')} style={{ padding: '6px 12px', background: currentProfile === 'Adik' ? '#198754' : '#fff', color: currentProfile === 'Adik' ? '#fff' : '#000', borderRadius: '5px', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Profil Adik</button>
         </div>
       </div>
 

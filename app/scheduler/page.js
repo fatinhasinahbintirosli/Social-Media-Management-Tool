@@ -92,14 +92,18 @@ export default function SchedulerPage() {
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`;
     
+    // Dikemaskini mengikut nama bucket di Supabase anda
     const { error } = await supabase.storage
-      .from('post-media')
+      .from('social media management tool')
       .upload(fileName, file);
 
     if (error) {
       alert('Gagal memuat naik fail: ' + error.message);
     } else {
-      const { data: publicUrlData } = supabase.storage.from('post-media').getPublicUrl(fileName);
+      const { data: publicUrlData } = supabase.storage
+        .from('social media management tool')
+        .getPublicUrl(fileName);
+        
       setUrlState(publicUrlData.publicUrl);
     }
     setFileUploading(false);

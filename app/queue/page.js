@@ -61,12 +61,12 @@ export default function QueuePage() {
     if (!confirm('Adakah anda pasti mahu memadam pos/queue ini?')) return;
 
     try {
-      const res = await fetch(`/api/schedule?id=${id}`, {
-        method: 'DELETE',
-      });
-      const data = await res.json();
+      const { error } = await supabase
+        .from('scheduled_posts')
+        .delete()
+        .eq('id', id);
 
-      if (!res.ok) throw new Error(data.error || 'Gagal memadam pos.');
+      if (error) throw error;
 
       alert('Berjaya dipadam!');
       setScheduledPosts((prev) => prev.filter((p) => p.id !== id));

@@ -137,16 +137,15 @@ export default function QueuePage() {
                     <td style={{ padding: '12px' }}>
                       {p.scheduled_at ? (() => {
                         const d = new Date(p.scheduled_at);
-                        const totalHours = d.getUTCHours() + 8;
-                        const day = d.getUTCDate() + (totalHours >= 24 ? 1 : 0);
-                        const month = String(d.getUTCMonth() + 1).padStart(2, '0');
-                        const year = d.getUTCFullYear();
-                        let hours = totalHours % 24;
-                        const minutes = String(d.getUTCMinutes()).padStart(2, '0');
+                        const day = String(d.getDate()).padStart(2, '0');
+                        const month = String(d.getMonth() + 1).padStart(2, '0');
+                        const year = d.getFullYear();
+                        let hours = d.getHours();
+                        const minutes = String(d.getMinutes()).padStart(2, '0');
                         const ampm = hours >= 12 ? 'PM' : 'AM';
                         hours = hours % 12;
                         hours = hours ? hours : 12;
-                        return `${String(day).padStart(2, '0')}/${month}/${year}, ${String(hours).padStart(2, '0')}:${minutes}:00 ${ampm}`;
+                        return `${day}/${month}/${year}, ${String(hours).padStart(2, '0')}:${minutes}:00 ${ampm}`;
                       })() : '-'}
                     </td>
                     <td style={{ padding: '12px' }}>

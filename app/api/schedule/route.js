@@ -6,31 +6,36 @@ import { supabase } from '../../../lib/supabaseClient';
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { 
-      pages,            // Array selected pages [{ page_id, access_token }, ...]
-      message,          // Mesej post
-      imageUrl,         // Public URL gambar dari Supabase Storage
-      mode,             // 'now', 'manual', atau 'auto'
-      scheduledTime,    // ISO String / Timestamp untuk Jadual Manual
-      firstComment,     // Mesej First Comment
-      commentImageUrl   // URL Gambar First Comment
-    } = body;
+    
+    // Menyokong fleksibiliti nama pemboleh ubah dari Frontend
+    const rawPages = body.pages || body.selectedPages || body.pagesPayload || [];
+    const message = body.message || body.caption || body.postText || '';
+    const imageUrl = body.imageUrl || body.image_url || '';
+    const mode = body.mode || 'now';
+    const scheduledTime = body.scheduledTime || body.scheduled_time;
+    const firstComment = body.firstComment || body.first_comment;
+    const commentImageUrl = body.commentImageUrl || body.comment_image_url;
 
-    if (!pages || pages.length === 0) {
+    if (!rawPages || rawPages.length === 0) {
       return NextResponse.json(
         { error: 'Sila pilih sekurang-kurangnya satu Page.' }, 
         { status: 400 }
       );
     }
 
-    // 🔴 BUANG PAGE DUPLIKAT (Pembersihan backend)
+    // 🔴 Pembersihan Duplikat: Buang page_id yang berulang
     const uniquePages = Array.from(
-      new Map(pages.map(item => [item.page_id, item])).values()
+      new Map(rawPages.map(item => [item.page_id || item.id, item])).values()
     );
 
-    // Process serentak untuk semua page unik menggunakan Promise.allSettled
+    // Dynamic Parallel Execution menggunakan Promise.allSettled
     const postPromises = uniquePages.map(async (page) => {
-      const { page_id, access_token } = page;
+      const page_id = page.page_id || page.id;
+      const access_token = page.access_token || page.token;
+
+      if (!page_id || !access_token) {
+        throw new Error(`Maklumat Page tidak lengkap untuk ID: ${page_id}`);
+      }
 
       // ==========================================
       // MOD 1: POS SEKARANG ('now')
@@ -61,7 +66,7 @@ export async function POST(request) {
 
         const postId = fbData.id || fbData.post_id;
 
-        // Post First Comment jika ada
+        // Hantar First Comment jika disediakan
         if (firstComment || commentImageUrl) {
           await postFirstComment(postId, access_token, firstComment, commentImageUrl);
         }
@@ -138,7 +143,6 @@ export async function POST(request) {
       }
     });
 
-    // PARALLEL EXECUTION
     const results = await Promise.allSettled(postPromises);
 
     const successful = results

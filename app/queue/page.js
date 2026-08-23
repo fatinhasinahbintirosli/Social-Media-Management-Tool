@@ -134,7 +134,20 @@ export default function QueuePage() {
                 filteredPosts.map(p => (
                   <tr key={p.id} style={{ borderBottom: '1px solid #eee' }}>
                     <td style={{ padding: '12px', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.message || '(Tiada teks)'}</td>
-                    <td style={{ padding: '12px' }}>{p.scheduled_at ? new Date(p.scheduled_at).toLocaleString() : '-'}</td>
+                    <td style={{ padding: '12px' }}>
+                      {p.scheduled_at ? (() => {
+                        const d = new Date(p.scheduled_at);
+                        const day = String(d.getDate()).padStart(2, '0');
+                        const month = String(d.getMonth() + 1).padStart(2, '0');
+                        const year = d.getFullYear();
+                        let hours = d.getHours();
+                        const minutes = String(d.getMinutes()).padStart(2, '0');
+                        const ampm = hours >= 12 ? 'PM' : 'AM';
+                        hours = hours % 12;
+                        hours = hours ? hours : 12;
+                        return `${day}/${month}/${year}, ${String(hours).padStart(2, '0')}:${minutes}:00 ${ampm}`;
+                      })() : '-'}
+                    </td>
                     <td style={{ padding: '12px' }}>
                       <span style={{ 
                         padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold',

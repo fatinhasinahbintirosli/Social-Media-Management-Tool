@@ -15,11 +15,10 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Sila pilih sekurang-kurangnya satu Page.' }, { status: 400 });
     }
 
-    // Jika menggunakan auto-queue atau jadual manual
+    // Jika menggunakan auto-queue atau jadual manual (simpan terus dalam bentuk tatasusunan page_ids)
     if (scheduledAt === 'auto-queue' || (scheduledAt && new Date(scheduledAt) > new Date())) {
-      // Masukkan ke dalam jadual database
-      const queueItems = pageIds.map(pageId => ({
-        page_id: pageId,
+      const queueData = {
+        page_ids: pageIds, // Menggunakan lajur page_ids yang betul mengikut schema database
         message,
         image_url: imageUrl,
         video_url: videoUrl,
@@ -28,9 +27,9 @@ export async function POST(request) {
         scheduled_at: scheduledAt === 'auto-queue' ? null : scheduledAt,
         status: 'pending',
         profile: profile || 'Fatin'
-      }));
+      };
 
-      const { error } = await supabase.from('scheduled_posts').insert(queueItems);
+      const { error } = await supabase.from('scheduled_posts').insert([queueData]);
       if (error) throw new Error(error.message);
 
       return NextResponse.json({ success: true, message: 'Berjaya dimasukkan ke dalam senarai queue!' });
@@ -39,7 +38,6 @@ export async function POST(request) {
     // Jika pos terus (pos sekarang) menggunakan Promise.allSettled
     const results = await Promise.allSettled(
       pageIds.map(async (pageId) => {
-        // Dapatkan token akses untuk page tersebut dari database
         const { data: pageData, error: pageError } = await supabase
           .from('pages')
           .select('access_token')
@@ -73,13 +71,11 @@ export async function POST(request) {
           throw new Error(fbResult.error?.message || 'Gagal pos ke Facebook');
         }
 
-        // Jika ada first comment
         if (firstComment && fbResult.id) {
           const commentEndpoint = `https://graph.facebook.com/v19.0/${fbResult.id}/comments`;
           let commentData = { message: firstComment, access_token: accessToken };
 
           if (commentImageUrl) {
-            // Jika ada gambar untuk komen
             commentData.attachment_url = commentImageUrl;
           }
 
@@ -94,7 +90,6 @@ export async function POST(request) {
       })
     );
 
-    // Semak keputusan Promise.allSettled
     const failures = results.filter(r => r.status === 'rejected');
     if (failures.length > 0 && failures.length === pageIds.length) {
       throw new Error(failures[0].reason.message || 'Semua pos gagal dihantar.');

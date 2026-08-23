@@ -6,6 +6,14 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
+// Fungsi pembantu untuk mendapatkan masa tempatan Malaysia yang tepat (UTC+8)
+function getLocalISOString() {
+  const now = new Date();
+  // Anjakkan masa kepada zon masa Malaysia (+8 jam)
+  const malaysianTime = new Date(now.getTime() + (8 * 60 * 60 * 1000));
+  return malaysianTime.toISOString().replace('Z', '+08:00');
+}
+
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -20,13 +28,14 @@ export async function POST(request) {
       const results = await Promise.allSettled(
         pageIds.map(async (pageId) => {
           const queueData = {
-            page_ids: [pageId], // Simpan sebagai tatasusunan untuk setiap page
+            page_ids: [pageId], 
             message,
             image_url: imageUrl,
             video_url: videoUrl,
             first_comment: firstComment,
             comment_image_url: commentImageUrl,
-            scheduled_at: scheduledAt === 'auto-queue' ? new Date().toISOString() : scheduledAt,
+            // Gunakan fungsi masa tempatan Malaysia jika auto-queue
+            scheduled_at: scheduledAt === 'auto-queue' ? getLocalISOString() : scheduledAt,
             status: 'pending',
             profile: profile || 'Fatin'
           };

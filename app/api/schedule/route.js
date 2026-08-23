@@ -1,224 +1,166 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
-
-export const dynamic = 'force-dynamic';
+import { supabase } from '@/lib/supabaseClient'; // Menggunakan client supabase sedia ada dari lib
 
 export async function POST(request) {
   try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const body = await request.json();
+    const { 
+      pages,            // Array of selected pages [{ page_id, access_token }, ...]
+      message,          // Mesej post
+      imageUrl,         // Public URL gambar dari Supabase Storage
+      mode,             // 'now', 'manual', atau 'auto'
+      scheduledTime,    // ISO String / Timestamp untuk Jadual Manual
+      firstComment,     // Mesej First Comment
+      commentImageUrl   // URL Gambar First Comment
+    } = body;
 
-    if (!supabaseUrl || !supabaseKey) {
-      return NextResponse.json({ error: 'Kunci Supabase belum ditetapkan.' }, { status: 500 });
+    if (!pages || pages.length === 0) {
+      return NextResponse.json({ error: 'Sila pilih sekurang-kurangnya satu Page.' }, { status: 400 });
     }
 
-    const supabase = createClient(supabaseUrl, supabaseKey);
-    
-    let body;
-    try {
-      body = await request.json();
-    } catch (err) {
-      return NextResponse.json({ error: 'Format data JSON tidak sah.' }, { status: 400 });
-    }
+    // Process serentak untuk semua page menggunakan Promise.allSettled
+    const postPromises = pages.map(async (page) => {
+      const { page_id, access_token } = page;
 
-    const { pageIds, message, imageUrl, videoUrl, firstComment, commentImageUrl, scheduledAt, profile } = body;
-    const activeProfile = profile || 'Fatin';
-
-    if (!pageIds || !Array.isArray(pageIds) || pageIds.length === 0) {
-      return NextResponse.json({ error: 'Sila pilih sekurang-kurangnya satu Facebook Page.' }, { status: 400 });
-    }
-
-    let targetScheduledTime = null;
-    let isNow = false;
-
-    if (scheduledAt && scheduledAt !== 'auto-queue') {
-      const formattedScheduledAt = scheduledAt.endsWith('Z') || scheduledAt.includes('+') ? scheduledAt : `${scheduledAt}:00+08:00`;
-      const parsedDate = new Date(formattedScheduledAt);
-      if (isNaN(parsedDate.getTime())) {
-        return NextResponse.json({ error: 'Format masa jadual tidak sah.' }, { status: 400 });
-      }
-      targetScheduledTime = parsedDate.toISOString();
-    } else if (scheduledAt === 'auto-queue') {
-      // Logic auto-queue
-      const { data: lastPosts } = await supabase
-        .from('scheduled_posts')
-        .select('scheduled_at')
-        .eq('status', 'pending')
-        .eq('profile', activeProfile)
-        .order('scheduled_at', { ascending: false })
-        .limit(1);
-
-      const { data: queueSettings } = await supabase
-        .from('queue_settings')
-        .select('*')
-        .eq('is_active', true)
-        .eq('profile', activeProfile);
-
-      const nowUTC = new Date();
-      const localTimeStr = nowUTC.toLocaleString('en-US', { timeZone: 'Asia/Kuala_Lumpur' });
-      let baseDate = new Date(localTimeStr);
-      
-      if (lastPosts && lastPosts.length > 0 && lastPosts[0].scheduled_at) {
-        const lastDateUTC = new Date(lastPosts[0].scheduled_at);
-        const lastLocalStr = lastDateUTC.toLocaleString('en-US', { timeZone: 'Asia/Kuala_Lumpur' });
-        const lastDate = new Date(lastLocalStr);
-        if (!isNaN(lastDate.getTime())) {
-          baseDate = lastDate;
-        }
-      }
-
-      let nextSlotTimeStr = null;
-
-      if (queueSettings && queueSettings.length > 0) {
-        const currentDayOfWeek = baseDate.getDay();
-        
-        const parseTimeToMinutes = (timeStr) => {
-          if (!timeStr) return 0;
-          if (timeStr.includes('M')) {
-            const [timePart, modifier] = timeStr.split(' ');
-            let [hours, minutes] = timePart.split(':').map(Number);
-            if (modifier === 'PM' && hours < 12) hours += 12;
-            if (modifier === 'AM' && hours === 12) hours = 0;
-            return hours * 60 + minutes;
-          }
-          const parts = timeStr.split(':').map(Number);
-          return parts[0] * 60 + (parts[1] || 0);
+      // ==========================================
+      // MOD 1: POS SEKARANG ('now')
+      // ==========================================
+      if (mode === 'now') {
+        let endpoint = `https://graph.facebook.com/v19.0/${page_id}/feed`;
+        let payload = {
+          access_token: access_token,
+          message: message,
         };
 
-        const baseMinutes = baseDate.getHours() * 60 + baseDate.getMinutes();
-
-        const todaySlots = queueSettings
-          .filter((q) => q.day_of_week === currentDayOfWeek)
-          .map((q) => ({ ...q, totalMinutes: parseTimeToMinutes(q.time_slot) }))
-          .sort((a, b) => a.totalMinutes - b.totalMinutes);
-
-        let candidate = todaySlots.find((q) => q.totalMinutes > baseMinutes);
-
-        if (!candidate) {
-          baseDate.setDate(baseDate.getDate() + 1);
-          baseDate.setHours(0, 0, 0, 0);
-          const nextDayOfWeek = baseDate.getDay();
-          
-          const tomorrowSlots = queueSettings
-            .filter((q) => q.day_of_week === nextDayOfWeek)
-            .map((q) => ({ ...q, totalMinutes: parseTimeToMinutes(q.time_slot) }))
-            .sort((a, b) => a.totalMinutes - b.totalMinutes);
-
-          candidate = tomorrowSlots[0] || queueSettings[0];
+        if (imageUrl) {
+          endpoint = `https://graph.facebook.com/v19.0/${page_id}/photos`;
+          payload.url = imageUrl;
+          payload.caption = message;
         }
 
-        if (candidate && candidate.time_slot) {
-          nextSlotTimeStr = candidate.time_slot;
+        const fbRes = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        const fbData = await fbRes.json();
+        if (fbData.error) throw new Error(`[${page_id}] FB Error: ${fbData.error.message}`);
+
+        const postId = fbData.id || fbData.post_id;
+
+        // Post First Comment jika ada
+        if (firstComment || commentImageUrl) {
+          await postFirstComment(postId, access_token, firstComment, commentImageUrl);
         }
-      }
 
-      let targetHours = 15;
-      let targetMinutes = 0;
+        return { page_id, status: 'posted', postId };
+      } 
 
-      if (nextSlotTimeStr) {
-        if (nextSlotTimeStr.includes('M')) {
-          const [timePart, modifier] = nextSlotTimeStr.split(' ');
-          let [hours, minutes] = timePart.split(':').map(Number);
-          if (modifier === 'PM' && hours < 12) hours += 12;
-          if (modifier === 'AM' && hours === 12) hours = 0;
-          targetHours = hours;
-          targetMinutes = minutes;
+      // ==========================================
+      // MOD 2: JADUAL MANUAL ('manual')
+      // ==========================================
+      else if (mode === 'manual') {
+        const publishTimestamp = Math.floor(new Date(scheduledTime).getTime() / 1000);
+        
+        let endpoint = `https://graph.facebook.com/v19.0/${page_id}/feed`;
+        let payload = {
+          access_token: access_token,
+          published: false,
+          scheduled_publish_time: publishTimestamp,
+        };
+
+        if (imageUrl) {
+          endpoint = `https://graph.facebook.com/v19.0/${page_id}/photos`;
+          payload.url = imageUrl;
+          payload.caption = message;
         } else {
-          const [hours, minutes] = nextSlotTimeStr.split(':').map(Number);
-          targetHours = hours;
-          targetMinutes = minutes || 0;
+          payload.message = message;
         }
+
+        const fbRes = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        const fbData = await fbRes.json();
+        if (fbData.error) throw new Error(`[${page_id}] FB Schedule Error: ${fbData.error.message}`);
+
+        if (firstComment || commentImageUrl) {
+          await supabase.from('scheduled_comments').insert({
+            page_id,
+            post_id: fbData.id,
+            comment_text: firstComment,
+            comment_image_url: commentImageUrl,
+            scheduled_at: scheduledTime,
+            status: 'pending'
+          });
+        }
+
+        return { page_id, status: 'scheduled', scheduledTime };
+      } 
+
+      // ==========================================
+      // MOD 3: AUTO-QUEUE / FATIN ('auto')
+      // ==========================================
+      else if (mode === 'auto') {
+        const { error } = await supabase.from('auto_queue').insert({
+          page_id: page_id,
+          access_token: access_token,
+          message: message,
+          image_url: imageUrl,
+          first_comment: firstComment,
+          comment_image_url: commentImageUrl,
+          status: 'queued',
+          created_at: new Date().toISOString()
+        });
+
+        if (error) throw new Error(`[${page_id}] Queue DB Error: ${error.message}`);
+
+        return { page_id, status: 'queued' };
       }
+    });
 
-      baseDate.setHours(targetHours, targetMinutes, 0, 0);
+    // PARALLEL EXECUTION: Hantar kesemua request serentak
+    const results = await Promise.allSettled(postPromises);
 
-      const year = baseDate.getFullYear();
-      const month = String(baseDate.getMonth() + 1).padStart(2, '0');
-      const day = String(baseDate.getDate()).padStart(2, '0');
-      const hours = String(baseDate.getHours()).padStart(2, '0');
-      const minutes = String(baseDate.getMinutes()).padStart(2, '0');
-      const seconds = String(baseDate.getSeconds()).padStart(2, '0');
+    const successful = results
+      .filter(r => r.status === 'fulfilled')
+      .map(r => r.value);
 
-      targetScheduledTime = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}+08:00`;
-    } else {
-      // KES 'POST NOW': Set masa 10 minit ke belakang supaya dipastikan melepasi penapis NOW() cron!
-      isNow = true;
-      const pastTime = new Date(Date.now() - 10 * 60 * 1000);
-      targetScheduledTime = pastTime.toISOString();
-    }
+    const failed = results
+      .filter(r => r.status === 'rejected')
+      .map(r => r.reason.message);
 
-    // 1. Simpan hantaran ke database
-    const { data: insertedData, error: insertError } = await supabase
-      .from('scheduled_posts')
-      .insert({
-        page_ids: pageIds,
-        message: message || '',
-        image_url: imageUrl || null,
-        video_url: videoUrl || null,
-        first_comment: firstComment || null,
-        comment_image_url: commentImageUrl || null,
-        scheduled_at: targetScheduledTime,
-        status: 'pending',
-        profile: activeProfile,
-      })
-      .select();
-
-    if (insertError) {
-      return NextResponse.json({ error: `Gagal menjadualkan pos: ${insertError.message}` }, { status: 500 });
-    }
-
-    // 2. Jika ini Post Now, Panggil Terus Process-Posts
-    if (isNow) {
-      const host = request.headers.get('host');
-      const protocol = request.headers.get('x-forwarded-proto') || 'https';
-      
-      // Panggil penghantaran serta-merta tanpa sebarang penangguhan
-      await fetch(`${protocol}://${host}/api/cron/process-posts`, {
-        method: 'GET',
-        headers: { 'Cache-Control': 'no-cache' }
-      });
-    }
-
-    return NextResponse.json({ 
-      success: true, 
-      message: isNow 
-        ? `Pos telah berjaya diproses dan dihantar!` 
-        : `Pos berjaya dijadualkan (${activeProfile})!` 
+    return NextResponse.json({
+      success: true,
+      total: pages.length,
+      successCount: successful.length,
+      failedCount: failed.length,
+      successful,
+      failed
     }, { status: 200 });
 
-  } catch (error) {
-    return NextResponse.json({ error: error.message || 'Ralat dalaman server.' }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
-export async function DELETE(request) {
+// Helper Function First Comment
+async function postFirstComment(postId, accessToken, commentText, commentImageUrl) {
   try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    let commentPayload = { access_token: accessToken };
+    
+    if (commentText) commentPayload.message = commentText;
+    if (commentImageUrl) commentPayload.attachment_url = commentImageUrl;
 
-    if (!supabaseUrl || !supabaseKey) {
-      return NextResponse.json({ error: 'Kunci Supabase belum ditetapkan.' }, { status: 500 });
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseKey);
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-
-    if (!id) {
-      return NextResponse.json({ error: 'ID pos tidak diberikan.' }, { status: 400 });
-    }
-
-    const { error } = await supabase
-      .from('scheduled_posts')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      return NextResponse.json({ error: `Gagal memadam pos: ${error.message}` }, { status: 500 });
-    }
-
-    return NextResponse.json({ success: true, message: 'Pos berjaya dipadam!' }, { status: 200 });
-  } catch (error) {
-    return NextResponse.json({ error: error.message || 'Ralat server.' }, { status: 500 });
+    await fetch(`https://graph.facebook.com/v19.0/${postId}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(commentPayload),
+    });
+  } catch (err) {
+    console.error(`Gagal First Comment post ${postId}:`, err);
   }
 }

@@ -23,8 +23,15 @@ export async function POST(request) {
 
     // 1. MOD AUTO-QUEUE / JADUAL MANUAL
     if (scheduledAt === 'auto-queue' || (scheduledAt && new Date(scheduledAt) > new Date())) {
-      // Jika auto-queue guna waktu tempatan, jika jadual manual guna terus nilai scheduledAt dari borang tanpa ubah
-      const finalScheduledAt = scheduledAt === 'auto-queue' ? getLocalISOString() : scheduledAt;
+      // Tentukan nilai masa mengikut mod
+      let finalScheduledAt = scheduledAt;
+      if (scheduledAt === 'auto-queue') {
+        finalScheduledAt = getLocalISOString();
+      } else if (scheduledAt) {
+        // Paksa backend membaca string datetime-local sebagai waktu tempatan Malaysia (UTC+8)
+        // supaya jam yang dipilih (cth: 05:00 AM) tidak beralih kepada 1:00 PM
+        finalScheduledAt = new Date(scheduledAt + '+08:00').toISOString();
+      }
 
       const queueData = {
         page_ids: pageIds, 

@@ -8,9 +8,10 @@ export async function GET() {
       process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
     );
 
+    // Ambil masa ISO UTC semasa
     const now = new Date().toISOString();
 
-    // 1. Cari post yang berstatus 'pending' dan sudah sampai/melewati masa penjadualan
+    // 1. Cari post yang berstatus 'pending' dan melepasi/sama dengan scheduled_at
     const { data: posts, error: fetchError } = await supabase
       .from('scheduled_posts')
       .select('*')
@@ -27,16 +28,16 @@ export async function GET() {
 
     const results = [];
 
-    // 2. Loop setiap post yang perlu dimuat naik
+    // 2. Loop setiap post yang perlu diproses
     for (const post of posts) {
       let pageIds = [];
       try {
         pageIds = typeof post.page_ids === 'string' ? JSON.parse(post.page_ids) : post.page_ids;
       } catch (e) {
-        pageIds = post.page_ids || [];
+        pageIds = Array.isArray(post.page_ids) ? post.page_ids : [];
       }
 
-      // Ambil Access Token bagi Facebook Page yang terlibat dari jadual 'pages'
+      // Ambil Access Token dari jadual 'pages'
       const { data: pagesData } = await supabase
         .from('pages')
         .select('page_id, access_token')
@@ -47,24 +48,34 @@ export async function GET() {
           .from('scheduled_posts')
           .update({ status: 'failed', error_log: 'Page access token tidak dijumpai.' })
           .eq('id', post.id);
+        
+        results.push({ id: post.id, status: 'failed', error: 'Token tidak dijumpai' });
         continue;
       }
 
       let hasError = false;
       let lastErrorMessage = '';
 
-      // 3. Hantar post ke Facebook Graph API untuk setiap page
+      // 3. Hantar post ke Facebook Graph API bagi setiap Page
       for (const page of pagesData) {
-        const fbUrl = `https://graph.facebook.com/v19.0/${page.page_id}/feed`;
-        const bodyParams = new URLSearchParams({
-          message: post.message || '',
-          access_token: page.access_token,
-        });
+        let fbUrl = `https://graph.facebook.com/v19.0/${page.page_id}/feed`;
+        const bodyParams = new URLSearchParams();
+        bodyParams.append('access_token', page.access_token);
 
+        // Penentuan jenis kandungan (Gambar / Video / Teks Sahaja)
         if (post.image_url) {
-          bodyParams.append('link', post.image_url);
+          fbUrl = `https://graph.facebook.com/v19.0/${page.page_id}/photos`;
+          bodyParams.append('url', post.image_url);
+          bodyParams.append('caption', post.message || '');
+        } else if (post.video_url) {
+          fbUrl = `https://graph.facebook.com/v19.0/${page.page_id}/videos`;
+          bodyParams.append('file_url', post.video_url);
+          bodyParams.append('description', post.message || '');
+        } else {
+          bodyParams.append('message', post.message || '');
         }
 
+        // Muat naik Post utama
         const fbRes = await fetch(fbUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -77,21 +88,29 @@ export async function GET() {
           hasError = true;
           lastErrorMessage = fbData.error.message;
         } else if (post.first_comment) {
-          // Hantar First Comment sekiranya ada
-          const postId = fbData.id;
-          const commentUrl = `https://graph.facebook.com/v19.0/${postId}/comments`;
-          await fetch(commentUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({
+          // 4. Hantar First Comment (Teks + Gambar jika ada)
+          const createdPostId = fbData.id || fbData.post_id;
+          if (createdPostId) {
+            const commentUrl = `https://graph.facebook.com/v19.0/${createdPostId}/comments`;
+            const commentParams = new URLSearchParams({
               message: post.first_comment,
               access_token: page.access_token,
-            }).toString(),
-          });
+            });
+
+            if (post.comment_image_url) {
+              commentParams.append('attachment_url', post.comment_image_url);
+            }
+
+            await fetch(commentUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: commentParams.toString(),
+            });
+          }
         }
       }
 
-      // 4. Kemaskini status post dalam Supabase
+      // 5. Kemaskini status akhir dalam Supabase
       if (hasError) {
         await supabase
           .from('scheduled_posts')

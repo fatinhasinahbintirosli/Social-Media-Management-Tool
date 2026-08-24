@@ -84,7 +84,6 @@ export default function SchedulerPage() {
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`;
     
-    // Dikemas kini menggunakan nama bucket sebenar dari Supabase Dashboard anda
     const { error } = await supabase.storage
       .from('social media management tool')
       .upload(fileName, file);
@@ -204,6 +203,11 @@ export default function SchedulerPage() {
       <div style={{ marginBottom: '20px', display: 'flex', gap: '10px', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
           <Link href="/queue-settings" style={{ padding: '8px 14px', background: '#333', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontSize: '13px', fontWeight: 'bold' }}>⚙️ Update Time Slots ({currentProfile})</Link>
+          
+          {/* BUTANG TAMBAH SOCIAL MEDIA */}
+          <Link href="/add-account" style={{ padding: '8px 14px', background: '#2563eb', color: '#fff', borderRadius: '6px', textDecoration: 'none', fontSize: '13px', fontWeight: 'bold' }}>
+            + Add Social Media
+          </Link>
           
           <Link 
             href="/queue" 
@@ -330,7 +334,11 @@ export default function SchedulerPage() {
             disabled={loading || fileUploading} 
             style={{ width: '100%', padding: '12px', background: '#0d6efd', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '15px', cursor: 'pointer' }}
           >
-            {loading ? 'Memproses...' : (postMode === 'now' ? 'Hantar Sekarang' : `Masukkan ke Auto-Queue (${currentProfile})`)}
+            {loading ? 'Memproses...' : (
+              postMode === 'now' ? 'Pos Sekarang' :
+              postMode === 'manual' ? 'Simpan Jadual Manual' :
+              `Masukkan ke Auto-Queue (${currentProfile})`
+            )}
           </button>
         </form>
 

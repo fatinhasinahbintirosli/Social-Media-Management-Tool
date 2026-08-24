@@ -6,7 +6,6 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
-// Tukar format masa 'HH:MM' atau 'HH:MM:SS' kepada jumlah minit
 function timeToMinutes(timeStr) {
   if (!timeStr || typeof timeStr !== 'string') return 0;
   const parts = timeStr.trim().split(':');
@@ -33,57 +32,65 @@ export async function POST(request) {
       let finalScheduledAt = scheduledAt;
 
       if (scheduledAt === 'auto-queue') {
-        // Dapatkan masa Semasa di Malaysia (UTC+8) secara tepat
         const now = new Date();
         const malaysiaTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kuala_Lumpur' }));
         
         const currentTotalMinutes = malaysiaTime.getHours() * 60 + malaysiaTime.getMinutes();
-        const currentDayOfWeek = malaysiaTime.getDay(); // 0 = Ahad, 1 = Isnin, ..., 6 = Sabtu
+        const currentDayOfWeek = malaysiaTime.getDay();
 
-        // Ambil tetapan timeslot mengikut profil DAN hari semasa dari database
-        const { data: slotData, error: slotError } = await supabase
+        // Cuba cari mengikut hari semasa terlebih dahulu
+        let { data: slotData, error: slotError } = await supabase
           .from('queue_settings')
           .select('*')
           .eq('profile', currentProfile)
           .eq('day_of_week', currentDayOfWeek)
           .eq('is_active', true);
 
+        // Jika tiada slot untuk hari ini, ambil mana-mana slot aktif untuk profil ini (Fallback)
         if (slotError || !slotData || slotData.length === 0) {
-          throw new Error(`Tiada timeslot aktif dijumpai dalam database untuk profil ${currentProfile} pada hari ini (Hari ke-${currentDayOfWeek}).`);
+          const { data: fallbackData, error: fallbackError } = await supabase
+            .from('queue_settings')
+            .select('*')
+            .eq('profile', currentProfile)
+            .eq('is_active', true);
+
+          if (fallbackError || !fallbackData || fallbackData.length === 0) {
+            throw new Error(`Tiada langsung timeslot aktif dijumpai dalam database untuk profil ${currentProfile}. Sila kemas kini tetapan Timeslot.`);
+          }
+          slotData = fallbackData;
         }
 
-        // Ambil lajur time_slot
         const validSlots = slotData
           .map(s => s.time_slot)
           .filter(t => t && typeof t === 'string');
 
         if (validSlots.length === 0) {
-          throw new Error(`Tiada timeslot sah dijumpai untuk profil ${currentProfile}.`);
+          throw new Error(`Tiada format timeslot sah dijumpai untuk profil ${currentProfile}.`);
         }
 
         let nextSlotTimeStr = null;
         let targetDate = new Date(malaysiaTime);
 
-        // Susun slot dari awal ke lewat berdasarkan minit
-        const sortedSlots = validSlots.sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
+        // Buang nilai masa yang bertindih (duplicate timeslot) agar senarai unik
+        const uniqueSlots = [...new Set(validSlots)];
+        const sortedSlots = uniqueSlots.sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
+        
         const upcomingSlot = sortedSlots.find(slot => timeToMinutes(slot) > currentTotalMinutes);
 
         if (upcomingSlot) {
           nextSlotTimeStr = upcomingSlot;
         } else {
-          // Jika sudah lepas semua slot hari ini, ambil slot pertama esok
+          // Jika sudah lepas semua slot, ambil slot pertama untuk esok
           nextSlotTimeStr = sortedSlots[0];
           targetDate.setDate(targetDate.getDate() + 1);
         }
 
-        // Pecahkan jam dan minit
         const parts = nextSlotTimeStr.trim().split(':');
         const slotHours = parseInt(parts[0], 10);
         const slotMinutes = parseInt(parts[1], 10);
 
         targetDate.setHours(slotHours, slotMinutes, 0, 0);
         
-        // Format semula ke ISO string dengan offset +08:00
         const year = targetDate.getFullYear();
         const month = String(targetDate.getMonth() + 1).padStart(2, '0');
         const day = String(targetDate.getDate()).padStart(2, '0');

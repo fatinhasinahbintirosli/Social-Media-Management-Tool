@@ -87,8 +87,9 @@ export async function POST(request) {
         finalScheduledAt = new Date(scheduledAt + '+08:00').toISOString();
       }
 
-      const queueData = {
-        page_ids: pageIds, 
+      // Pecahkan pageIds supaya setiap page mempunyai satu baris queue yang unik
+      const queueRecords = pageIds.map(pageId => ({
+        page_ids: [pageId], 
         message,
         image_url: imageUrl,
         video_url: videoUrl,
@@ -97,9 +98,9 @@ export async function POST(request) {
         scheduled_at: finalScheduledAt,
         status: 'pending',
         profile: currentProfile
-      };
+      }));
 
-      const { error } = await supabase.from('scheduled_posts').insert([queueData]);
+      const { error } = await supabase.from('scheduled_posts').insert(queueRecords);
       if (error) throw new Error(error.message);
 
       return NextResponse.json({ success: true, message: `Berjaya dimasukkan ke dalam senarai Auto-Queue (${currentProfile})!` });

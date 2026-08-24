@@ -6,7 +6,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
-// Tukar format masa 'HH:MM' (24-jam) kepada jumlah minit
+// Tukar format masa 'HH:MM' atau 'HH:MM:SS' kepada jumlah minit
 function timeToMinutes(timeStr) {
   if (!timeStr || typeof timeStr !== 'string') return 0;
   const parts = timeStr.trim().split(':');
@@ -34,20 +34,24 @@ export async function POST(request) {
 
       if (scheduledAt === 'auto-queue') {
         const now = new Date();
+        // Zon masa Malaysia (UTC+8)
         const malaysianTime = new Date(now.getTime() + (8 * 60 * 60 * 1000));
         const currentTotalMinutes = malaysianTime.getUTCHours() * 60 + malaysianTime.getUTCMinutes();
+        const currentDayOfWeek = malaysianTime.getUTCDay(); // 0 = Ahad, 1 = Isnin, ..., 6 = Sabtu
 
-        // Ambil tetapan timeslot mengikut profil semasa dari database
+        // Ambil tetapan timeslot mengikut profil DAN hari semasa dari database
         const { data: slotData, error: slotError } = await supabase
           .from('queue_settings')
           .select('*')
-          .eq('profile', currentProfile);
+          .eq('profile', currentProfile)
+          .eq('day_of_week', currentDayOfWeek)
+          .eq('is_active', true);
 
         if (slotError || !slotData || slotData.length === 0) {
-          throw new Error(`Tiada timeslot dijumpai dalam database untuk profil ${currentProfile}.`);
+          throw new Error(`Tiada timeslot aktif dijumpai dalam database untuk profil ${currentProfile} pada hari ini.`);
         }
 
-        // Ambil lajur time_slot (format HH:MM)
+        // Ambil lajur time_slot
         const validSlots = slotData
           .map(s => s.time_slot)
           .filter(t => t && typeof t === 'string');
@@ -66,11 +70,15 @@ export async function POST(request) {
         if (upcomingSlot) {
           nextSlotTimeStr = upcomingSlot;
         } else {
+          // Jika sudah lepas semua slot hari ini, ambil slot pertama esok
           nextSlotTimeStr = sortedSlots[0];
           targetDate.setUTCDate(targetDate.getUTCDate() + 1);
         }
 
-        const [slotHours, slotMinutes] = nextSlotTimeStr.trim().split(':').map(Number);
+        // Pecahkan jam dan minit (sokong format 'HH:MM' atau 'HH:MM:SS')
+        const parts = nextSlotTimeStr.trim().split(':');
+        const slotHours = parseInt(parts[0], 10);
+        const slotMinutes = parseInt(parts[1], 10);
 
         targetDate.setUTCHours(slotHours, slotMinutes, 0, 0);
         finalScheduledAt = targetDate.toISOString().replace('Z', '+08:00');

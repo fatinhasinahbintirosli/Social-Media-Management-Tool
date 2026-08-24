@@ -6,10 +6,13 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
-function getLocalISOString() {
-  const now = new Date();
-  const malaysianTime = new Date(now.getTime() + (8 * 60 * 60 * 1000));
-  return malaysianTime.toISOString().replace('Z', '+08:00');
+// Fungsi untuk menukar format masa "hh:mm AM/PM" kepada minit sejak tengah malam
+function timeToMinutes(timeStr) {
+  const [time, modifier] = timeStr.trim().split(' ');
+  let [hours, minutes] = time.split(':').map(Number);
+  if (modifier === 'PM' && hours < 12) hours += 12;
+  if (modifier === 'AM' && hours === 12) hours = 0;
+  return hours * 60 + minutes;
 }
 
 export async function POST(request) {
@@ -23,21 +26,55 @@ export async function POST(request) {
 
     const currentProfile = profile || 'Fatin';
 
-    // 1. MOD AUTO-QUEUE / JADUAL MANUAL (Pastikan syarat ini menangkap 'auto-queue' dengan tepat)
+    // 1. MOD AUTO-QUEUE / JADUAL MANUAL
     if (scheduledAt === 'auto-queue' || (scheduledAt && scheduledAt !== 'now' && new Date(scheduledAt) > new Date())) {
       let finalScheduledAt = scheduledAt;
 
       if (scheduledAt === 'auto-queue') {
-        // Logik mendapatkan slot masa seterusnya dari table queue_settings berdasarkan profil
-        const { data: slotData } = await supabase
+        // Dapatkan masa sekarang dalam waktu Malaysia (UTC+8)
+        const now = new Date();
+        const malaysianTime = new Date(now.getTime() + (8 * 60 * 60 * 1000));
+        const currentTotalMinutes = malaysianTime.getUTCHours() * 60 + malaysianTime.getUTCMinutes();
+
+        // Ambil senarai timeslot berdasarkan profil dari database
+        const { data: slotData, error: slotError } = await supabase
           .from('queue_settings')
           .select('time')
-          .eq('profile', currentProfile)
-          .order('time', { ascending: true });
+          .eq('profile', currentProfile);
 
-        // Jika anda mempunyai sistem pengiraan slot, letakkan di sini. 
-        // Buat sementara waktu, ia menggunakan masa semasa jika tiada slot khusus dijumpai.
-        finalScheduledAt = getLocalISOString();
+        if (slotError || !slotData || slotData.length === 0) {
+          throw new Error(`Tiada timeslot ditetapkan untuk profil ${currentProfile}. Sila set timeslot dahulu.`);
+        }
+
+        // Cari slot masa seterusnya yang belum lepas pada hari ini
+        let nextSlotTimeStr = null;
+        let targetDate = new Date(malaysianTime);
+
+        // Susun slot dari awal ke lewat
+        const sortedSlots = slotData.sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+
+        const upcomingSlot = sortedSlots.find(slot => timeToMinutes(slot.time) > currentTotalMinutes);
+
+        if (upcomingSlot) {
+          // Jika ada slot lagi hari ini
+          nextSlotTimeStr = upcomingSlot.time;
+        } else {
+          // Jika semua slot hari ini sudah lepas, ambil slot pertama untuk esok
+          nextSlotTimeStr = sortedSlots[0].time;
+          targetDate.setUTCDate(targetDate.getUTCDate() + 1);
+        }
+
+        // Parsing jam dan minit slot terpilih
+        const [timePart, modifier] = nextSlotTimeStr.trim().split(' ');
+        let [slotHours, slotMinutes] = timePart.split(':').map(Number);
+        if (modifier === 'PM' && slotHours < 12) slotHours += 12;
+        if (modifier === 'AM' && slotHours === 12) slotHours = 0;
+
+        targetDate.setUTCHours(slotHours, slotMinutes, 0, 0);
+
+        // Tukar kembali ke format ISO string untuk database
+        finalScheduledAt = targetDate.toISOString().replace('Z', '+08:00');
+
       } else if (scheduledAt) {
         finalScheduledAt = new Date(scheduledAt + '+08:00').toISOString();
       }
@@ -57,10 +94,10 @@ export async function POST(request) {
       const { error } = await supabase.from('scheduled_posts').insert([queueData]);
       if (error) throw new Error(error.message);
 
-      return NextResponse.json({ success: true, message: `Berjaya dimasukkan ke dalam senarai Auto-Queue (${currentProfile})!` });
+      return NextResponse.json({ success: true, message: `Berjaya dimasukkan ke dalam senarai Auto-Queue (${currentProfile}) pada slot masa seterusnya!` });
     }
 
-    // 2. MOD POS SEKARANG (Hanya berjalan jika benar-benar mod 'now')
+    // 2. MOD POS SEKARANG
     const results = await Promise.allSettled(
       pageIds.map(async (pageId) => {
         const { data: pageData, error: pageError } = await supabase
@@ -120,7 +157,7 @@ export async function POST(request) {
       throw new Error(failures[0].reason.message || 'Semua pos gagal dihantar.');
     }
 
-    return. NextResponse.json({ 
+    return NextResponse.json({ 
       success: true, 
       message: failures.length > 0 
         ? `Pos berjaya dihantar ke sesetengah page (${pageIds.length - failures.length}/${pageIds.length}).` 

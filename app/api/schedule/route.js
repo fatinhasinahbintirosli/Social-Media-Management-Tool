@@ -36,7 +36,7 @@ export async function POST(request) {
         const malaysiaTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kuala_Lumpur' }));
         const currentTotalMinutes = malaysiaTime.getHours() * 60 + malaysiaTime.getMinutes();
 
-        // Ambil terus semua timeslot aktif untuk profil ini dari database
+        // Ambil timeslot aktif untuk profil ini
         const { data: slotData, error: slotError } = await supabase
           .from('queue_settings')
           .select('*')

@@ -6,7 +6,6 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
-// Fungsi untuk menukar format masa "hh:mm AM/PM" kepada minit sejak tengah malam
 function timeToMinutes(timeStr) {
   const [time, modifier] = timeStr.trim().split(' ');
   let [hours, minutes] = time.split(':').map(Number);
@@ -31,48 +30,48 @@ export async function POST(request) {
       let finalScheduledAt = scheduledAt;
 
       if (scheduledAt === 'auto-queue') {
-        // Dapatkan masa sekarang dalam waktu Malaysia (UTC+8)
         const now = new Date();
         const malaysianTime = new Date(now.getTime() + (8 * 60 * 60 * 1000));
         const currentTotalMinutes = malaysianTime.getUTCHours() * 60 + malaysianTime.getUTCMinutes();
 
-        // Ambil senarai timeslot berdasarkan profil dari database
-        const { data: slotData, error: slotError } = await supabase
-          .from('queue_settings')
-          .select('time')
-          .eq('profile', currentProfile);
+        // Cuba ambil timeslot dengan pelbagai variasi penapisan profil untuk mengelakkan ralat kosong
+        let slotData = null;
+        
+        const queryTry1 = await supabase.from('queue_settings').select('*').eq('profile', currentProfile);
+        if (queryTry1.data && queryTry1.data.length > 0) {
+          slotData = queryTry1.data;
+        } else {
+          // Jika gagal, cuba ambil semua data dari table queue_settings
+          const queryTry2 = await supabase.from('queue_settings').select('*');
+          slotData = queryTry2.data;
+        }
 
-        if (slotError || !slotData || slotData.length === 0) {
-          throw new Error(`Tiada timeslot ditetapkan untuk profil ${currentProfile}. Sila set timeslot dahulu.`);
+        if (!slotData || slotData.length === 0) {
+          throw new Error(`Tiada timeslot dijumpai dalam database untuk profil ${currentProfile}. Sila semak table queue_settings.`);
         }
 
         // Cari slot masa seterusnya yang belum lepas pada hari ini
         let nextSlotTimeStr = null;
         let targetDate = new Date(malaysianTime);
 
-        // Susun slot dari awal ke lewat
-        const sortedSlots = slotData.sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+        // Susun slot dari awal ke lewat berdasarkan lajur masa (biasanya dinamakan 'time')
+        const sortedSlots = slotData.sort((a, b) => timeToMinutes(a.time || a.timeslot || '') - timeToMinutes(b.time || b.timeslot || ''));
 
-        const upcomingSlot = sortedSlots.find(slot => timeToMinutes(slot.time) > currentTotalMinutes);
+        const upcomingSlot = sortedSlots.find(slot => timeToMinutes(slot.time || slot.timeslot || '') > currentTotalMinutes);
 
         if (upcomingSlot) {
-          // Jika ada slot lagi hari ini
-          nextSlotTimeStr = upcomingSlot.time;
+          nextSlotTimeStr = upcomingSlot.time || upcomingSlot.timeslot;
         } else {
-          // Jika semua slot hari ini sudah lepas, ambil slot pertama untuk esok
-          nextSlotTimeStr = sortedSlots[0].time;
+          nextSlotTimeStr = sortedSlots[0].time || sortedSlots[0].timeslot;
           targetDate.setUTCDate(targetDate.getUTCDate() + 1);
         }
 
-        // Parsing jam dan minit slot terpilih
         const [timePart, modifier] = nextSlotTimeStr.trim().split(' ');
         let [slotHours, slotMinutes] = timePart.split(':').map(Number);
         if (modifier === 'PM' && slotHours < 12) slotHours += 12;
         if (modifier === 'AM' && slotHours === 12) slotHours = 0;
 
         targetDate.setUTCHours(slotHours, slotMinutes, 0, 0);
-
-        // Tukar kembali ke format ISO string untuk database
         finalScheduledAt = targetDate.toISOString().replace('Z', '+08:00');
 
       } else if (scheduledAt) {

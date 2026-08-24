@@ -7,8 +7,12 @@ const supabase = createClient(
 );
 
 function timeToMinutes(timeStr) {
-  const [time, modifier] = timeStr.trim().split(' ');
+  if (!timeStr || typeof timeStr !== 'string') return 0;
+  const parts = timeStr.trim().split(' ');
+  if (parts.length < 2) return 0;
+  const [time, modifier] = parts;
   let [hours, minutes] = time.split(':').map(Number);
+  if (isNaN(hours) || isNaN(minutes)) return 0;
   if (modifier === 'PM' && hours < 12) hours += 12;
   if (modifier === 'AM' && hours === 12) hours = 0;
   return hours * 60 + minutes;
@@ -34,35 +38,32 @@ export async function POST(request) {
         const malaysianTime = new Date(now.getTime() + (8 * 60 * 60 * 1000));
         const currentTotalMinutes = malaysianTime.getUTCHours() * 60 + malaysianTime.getUTCMinutes();
 
-        // Cuba ambil timeslot dengan pelbagai variasi penapisan profil untuk mengelakkan ralat kosong
         let slotData = null;
-        
         const queryTry1 = await supabase.from('queue_settings').select('*').eq('profile', currentProfile);
         if (queryTry1.data && queryTry1.data.length > 0) {
           slotData = queryTry1.data;
         } else {
-          // Jika gagal, cuba ambil semua data dari table queue_settings
           const queryTry2 = await supabase.from('queue_settings').select('*');
           slotData = queryTry2.data;
         }
 
-        if (!slotData || slotData.length === 0) {
-          throw new Error(`Tiada timeslot dijumpai dalam database untuk profil ${currentProfile}. Sila semak table queue_settings.`);
+        // Tapis hanya data yang mempunyai masa yang sah
+        const validSlots = (slotData || []).map(s => s.time || s.timeslot).filter(t => t && typeof t === 'string');
+
+        if (validSlots.length === 0) {
+          throw new Error(`Tiada timeslot sah dijumpai dalam database untuk profil ${currentProfile}.`);
         }
 
-        // Cari slot masa seterusnya yang belum lepas pada hari ini
         let nextSlotTimeStr = null;
         let targetDate = new Date(malaysianTime);
 
-        // Susun slot dari awal ke lewat berdasarkan lajur masa (biasanya dinamakan 'time')
-        const sortedSlots = slotData.sort((a, b) => timeToMinutes(a.time || a.timeslot || '') - timeToMinutes(b.time || b.timeslot || ''));
-
-        const upcomingSlot = sortedSlots.find(slot => timeToMinutes(slot.time || slot.timeslot || '') > currentTotalMinutes);
+        const sortedSlots = validSlots.sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
+        const upcomingSlot = sortedSlots.find(slot => timeToMinutes(slot) > currentTotalMinutes);
 
         if (upcomingSlot) {
-          nextSlotTimeStr = upcomingSlot.time || upcomingSlot.timeslot;
+          nextSlotTimeStr = upcomingSlot;
         } else {
-          nextSlotTimeStr = sortedSlots[0].time || sortedSlots[0].timeslot;
+          nextSlotTimeStr = sortedSlots[0];
           targetDate.setUTCDate(targetDate.getUTCDate() + 1);
         }
 
@@ -93,7 +94,7 @@ export async function POST(request) {
       const { error } = await supabase.from('scheduled_posts').insert([queueData]);
       if (error) throw new Error(error.message);
 
-      return NextResponse.json({ success: true, message: `Berjaya dimasukkan ke dalam senarai Auto-Queue (${currentProfile}) pada slot masa seterusnya!` });
+      return NextResponse.json({ success: true, message: `Berjaya dimasukkan ke dalam senarai Auto-Queue (${currentProfile})!` });
     }
 
     // 2. MOD POS SEKARANG

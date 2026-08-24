@@ -1,254 +1,171 @@
-'use client';
-
-import { useState, useEffect } from 'react';
+import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import Link from 'next/link';
 
-const DAYS = [
-  { label: 'Monday', index: 1 },
-  { label: 'Tuesday', index: 2 },
-  { label: 'Wednesday', index: 3 },
-  { label: 'Thursday', index: 4 },
-  { label: 'Friday', index: 5 },
-  { label: 'Saturday', index: 6 },
-  { label: 'Sunday', index: 0 },
-];
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+);
 
-export default function QueueSettingsPage() {
-  const [currentProfile, setCurrentProfile] = useState('Fatin');
-  const [rows, setRows] = useState([]); // Format: [{ time: '07:41', days: [1, 3, 5] }]
-  const [loading, setLoading] = useState(false);
+// Tukar format masa 'HH:MM' (24-jam) kepada jumlah minit
+function timeToMinutes(timeStr) {
+  if (!timeStr || typeof timeStr !== 'string') return 0;
+  const parts = timeStr.trim().split(':');
+  if (parts.length < 2) return 0;
+  const hours = parseInt(parts[0], 10);
+  const minutes = parseInt(parts[1], 10);
+  if (isNaN(hours) || isNaN(minutes)) return 0;
+  return hours * 60 + minutes;
+}
 
-  const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+export async function POST(request) {
+  try {
+    const body = await request.json();
+    const { pageIds, message, imageUrl, videoUrl, firstComment, commentImageUrl, scheduledAt, profile } = body;
 
-  useEffect(() => {
-    const savedProfile = localStorage.getItem('fb_scheduler_profile');
-    if (savedProfile) setCurrentProfile(savedProfile);
-  }, []);
+    if (!pageIds || !Array.isArray(pageIds) || pageIds.length === 0) {
+      return NextResponse.json({ error: 'Sila pilih sekurang-kurangnya satu Page.' }, { status: 400 });
+    }
 
-  useEffect(() => {
-    async function fetchSettings() {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('queue_settings')
-        .select('*')
-        .eq('profile', currentProfile);
+    const currentProfile = profile || 'Fatin';
 
-      if (error) {
-        console.error('Ralat memuatkan queue:', error);
-        setLoading(false);
-        return;
-      }
+    // 1. MOD AUTO-QUEUE / JADUAL MANUAL
+    if (scheduledAt === 'auto-queue' || (scheduledAt && scheduledAt !== 'now' && new Date(scheduledAt) > new Date())) {
+      let finalScheduledAt = scheduledAt;
 
-      // Kumpulkan data mengikut masa (time_slot) khusus untuk profil semasa
-      const grouped = {};
-      (data || []).forEach(item => {
-        if (!item.time_slot) return;
-        const timeStr = item.time_slot.substring(0, 5); // 'HH:MM'
-        if (!grouped[timeStr]) {
-          grouped[timeStr] = [];
+      if (scheduledAt === 'auto-queue') {
+        const now = new Date();
+        const malaysianTime = new Date(now.getTime() + (8 * 60 * 60 * 1000));
+        const currentTotalMinutes = malaysianTime.getUTCHours() * 60 + malaysianTime.getUTCMinutes();
+
+        // Ambil tetapan timeslot mengikut profil semasa dari database
+        const { data: slotData, error: slotError } = await supabase
+          .from('queue_settings')
+          .select('*')
+          .eq('profile', currentProfile);
+
+        if (slotError || !slotData || slotData.length === 0) {
+          throw new Error(`Tiada timeslot dijumpai dalam database untuk profil ${currentProfile}.`);
         }
-        grouped[timeStr].push(item.day_of_week);
-      });
 
-      const formattedRows = Object.keys(grouped).map(time => ({
-        time,
-        days: grouped[time]
-      }));
+        // Ambil lajur time_slot (format HH:MM)
+        const validSlots = slotData
+          .map(s => s.time_slot)
+          .filter(t => t && typeof t === 'string');
 
-      setRows(formattedRows);
-      setLoading(false);
-    }
-    fetchSettings();
-  }, [currentProfile]);
+        if (validSlots.length === 0) {
+          throw new Error(`Tiada timeslot sah dijumpai untuk profil ${currentProfile}.`);
+        }
 
-  const handleProfileChange = (profileName) => {
-    setCurrentProfile(profileName);
-    localStorage.setItem('fb_scheduler_profile', profileName);
-  };
+        let nextSlotTimeStr = null;
+        let targetDate = new Date(malaysianTime);
 
-  const addRow = () => {
-    setRows([...rows, { time: '12:00', days: [] }]);
-  };
+        // Susun slot dari awal ke lewat berdasarkan minit
+        const sortedSlots = validSlots.sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
+        const upcomingSlot = sortedSlots.find(slot => timeToMinutes(slot) > currentTotalMinutes);
 
-  const removeRow = (index) => {
-    setRows(rows.filter((_, i) => i !== index));
-  };
+        if (upcomingSlot) {
+          nextSlotTimeStr = upcomingSlot;
+        } else {
+          nextSlotTimeStr = sortedSlots[0];
+          targetDate.setUTCDate(targetDate.getUTCDate() + 1);
+        }
 
-  const updateTime = (index, newTime) => {
-    const updated = [...rows];
-    updated[index].time = newTime;
-    setRows(updated);
-  };
+        const [slotHours, slotMinutes] = nextSlotTimeStr.trim().split(':').map(Number);
 
-  const toggleDay = (rowIndex, dayIndex) => {
-    const updated = [...rows];
-    const currentDays = updated[rowIndex].days;
-    if (currentDays.includes(dayIndex)) {
-      updated[rowIndex].days = currentDays.filter(d => d !== dayIndex);
-    } else {
-      updated[rowIndex].days = [...currentDays, dayIndex];
-    }
-    setRows(updated);
-  };
+        targetDate.setUTCHours(slotHours, slotMinutes, 0, 0);
+        finalScheduledAt = targetDate.toISOString().replace('Z', '+08:00');
 
-  const clearAll = () => {
-    setRows([]);
-  };
-
-  const saveSettings = async () => {
-    setLoading(true);
-    try {
-      // 1. Padam hanya data queue_settings yang sepadan dengan profil semasa
-      const { error: deleteError } = await supabase
-        .from('queue_settings')
-        .delete()
-        .eq('profile', currentProfile);
-
-      if (deleteError) throw deleteError;
-
-      // 2. Format semula data untuk dimasukkan ke database berserta nama profil
-      const insertData = [];
-      rows.forEach(row => {
-        row.days.forEach(day => {
-          insertData.push({
-            day_of_week: day,
-            time_slot: `${row.time}:00`,
-            is_active: true,
-            profile: currentProfile
-          });
-        });
-      });
-
-      if (insertData.length > 0) {
-        const { error: insertError } = await supabase.from('queue_settings').insert(insertData);
-        if (insertError) throw insertError;
+      } else if (scheduledAt) {
+        finalScheduledAt = new Date(scheduledAt + '+08:00').toISOString();
       }
 
-      alert(`Tetapan Timeslot berjaya disimpan untuk profil ${currentProfile}!`);
-    } catch (err) {
-      alert(`Ralat menyimpan: ${err.message}`);
-    } finally {
-      setLoading(false);
+      const queueData = {
+        page_ids: pageIds, 
+        message,
+        image_url: imageUrl,
+        video_url: videoUrl,
+        first_comment: firstComment,
+        comment_image_url: commentImageUrl,
+        scheduled_at: finalScheduledAt,
+        status: 'pending',
+        profile: currentProfile
+      };
+
+      const { error } = await supabase.from('scheduled_posts').insert([queueData]);
+      if (error) throw new Error(error.message);
+
+      return NextResponse.json({ success: true, message: `Berjaya dimasukkan ke dalam senarai Auto-Queue (${currentProfile})!` });
     }
-  };
 
-  return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#121212', color: '#fff', padding: '30px', fontFamily: 'sans-serif' }}>
-      
-      {/* Bahagian Navbar & Tukar Profil */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px', flexWrap: 'wrap', gap: '15px' }}>
-        <div>
-          <Link href="/" style={{ color: '#1877f2', textDecoration: 'none', fontSize: '14px', display: 'inline-block', marginBottom: '10px' }}>
-            ← Kembali ke Halaman Utama
-          </Link>
-          <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0 }}>Create Timeslot ({currentProfile})</h1>
-        </div>
+    // 2. MOD POS SEKARANG
+    const results = await Promise.allSettled(
+      pageIds.map(async (pageId) => {
+        const { data: pageData, error: pageError } = await supabase
+          .from('pages')
+          .select('access_token')
+          .eq('page_id', pageId)
+          .single();
 
-        {/* Butang Tukar Profil */}
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <span style={{ fontSize: '13px', color: '#a1a1aa' }}>Profil:</span>
-          <button
-            type="button"
-            onClick={() => handleProfileChange('Fatin')}
-            style={{
-              padding: '6px 14px',
-              borderRadius: '6px',
-              border: 'none',
-              background: currentProfile === 'Fatin' ? '#0d6efd' : '#27272a',
-              color: '#fff',
-              fontWeight: 'bold',
-              cursor: 'pointer',
-              fontSize: '13px'
-            }}
-          >
-            Fatin
-          </button>
-          <button
-            type="button"
-            onClick={() => handleProfileChange('Adik')}
-            style={{
-              padding: '6px 14px',
-              borderRadius: '6px',
-              border: 'none',
-              background: currentProfile === 'Adik' ? '#198754' : '#27272a',
-              color: '#fff',
-              fontWeight: 'bold',
-              cursor: 'pointer',
-              fontSize: '13px'
-            }}
-          >
-            Adik
-          </button>
-        </div>
+        if (pageError || !pageData?.access_token) {
+          throw new Error(`Token tidak dijumpai untuk page ID: ${pageId}`);
+        }
 
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <button onClick={clearAll} style={{ background: '#222', color: '#fff', border: '1px solid #444', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer' }}>Clear all</button>
-          <button onClick={addRow} style={{ background: '#222', color: '#fff', border: '1px solid #444', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer' }}>+ Add Timeslot</button>
-          <button onClick={saveSettings} disabled={loading} style={{ background: '#f97316', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>
-            {loading ? 'Menyimpan...' : 'Save Changes'}
-          </button>
-        </div>
-      </div>
+        const accessToken = pageData.access_token;
+        let endpoint = `https://graph.facebook.com/v19.0/${pageId}/feed`;
+        let postData = { message, access_token: accessToken };
 
-      <div style={{ backgroundColor: '#18181b', borderRadius: '8px', border: '1px solid #27272a', overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', fontSize: '14px' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid #27272a', color: '#a1a1aa' }}>
-              <th style={{ padding: '16px', width: '180px' }}>Time Slots</th>
-              {DAYS.map(d => <th key={d.index} style={{ padding: '16px' }}>{d.label}</th>)}
-              <th style={{ padding: '16px', width: '80px' }}>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan="9" style={{ padding: '30px', color: '#71717a' }}>Memuatkan timeslot untuk {currentProfile}...</td>
-              </tr>
-            ) : rows.length === 0 ? (
-              <tr>
-                <td colSpan="9" style={{ padding: '30px', color: '#71717a' }}>Tiada timeslot untuk {currentProfile}. Sila klik &quot;+ Add Timeslot&quot; di atas.</td>
-              </tr>
-            ) : (
-              rows.map((row, rowIndex) => (
-                <tr key={rowIndex} style={{ borderBottom: '1px solid #27272a' }}>
-                  <td style={{ padding: '16px' }}>
-                    <input 
-                      type="time" 
-                      value={row.time} 
-                      onChange={(e) => updateTime(rowIndex, e.target.value)}
-                      style={{ backgroundColor: '#27272a', color: '#fff', border: '1px solid #3f3f46', padding: '6px 10px', borderRadius: '6px', colorScheme: 'dark' }}
-                    />
-                  </td>
-                  {DAYS.map(d => (
-                    <td key={d.index} style={{ padding: '16px' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={row.days.includes(d.index)}
-                        onChange={() => toggleDay(rowIndex, d.index)}
-                        style={{ width: '18px', height: '18px', accentColor: '#1877f2', cursor: 'pointer' }}
-                      />
-                    </td>
-                  ))}
-                  <td style={{ padding: '16px' }}>
-                    <button onClick={() => removeRow(rowIndex)} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px' }}>
-                      🗑️
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-      
-      {rows.length > 0 && (
-        <div style={{ textAlign: 'center', marginTop: '20px' }}>
-          <button onClick={addRow} style={{ background: '#27272a', color: '#fff', border: '1px dashed #52525b', padding: '10px 24px', borderRadius: '6px', cursor: 'pointer' }}>
-            + Add Timeslot
-          </button>
-        </div>
-      )}
-    </div>
-  );
+        if (videoUrl) {
+          endpoint = `https://graph.facebook.com/v19.0/${pageId}/videos`;
+          postData = { description: message, file_url: videoUrl, access_token: accessToken };
+        } else if (imageUrl) {
+          endpoint = `https://graph.facebook.com/v19.0/${pageId}/photos`;
+          postData = { caption: message, url: imageUrl, access_token: accessToken };
+        }
+
+        const fbRes = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(postData),
+        });
+
+        const fbResult = await fbRes.json();
+        if (!fbRes.ok) {
+          throw new Error(fbResult.error?.message || 'Gagal pos ke Facebook');
+        }
+
+        if (firstComment && fbResult.id) {
+          const commentEndpoint = `https://graph.facebook.com/v19.0/${fbResult.id}/comments`;
+          let commentData = { message: firstComment, access_token: accessToken };
+
+          if (commentImageUrl) {
+            commentData.attachment_url = commentImageUrl;
+          }
+
+          await fetch(commentEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(commentData),
+          });
+        }
+
+        return { pageId, success: true };
+      })
+    );
+
+    const failures = results.filter(r => r.status === 'rejected');
+    if (failures.length > 0 && failures.length === pageIds.length) {
+      throw new Error(failures[0].reason.message || 'Semua pos gagal dihantar.');
+    }
+
+    return NextResponse.json({ 
+      success: true, 
+      message: failures.length > 0 
+        ? `Pos berjaya dihantar ke sesetengah page (${pageIds.length - failures.length}/${pageIds.length}).` 
+        : 'Pos berjaya dihantar ke semua Page terpilih!' 
+    });
+
+  } catch (err) {
+    console.error('Ralat API Schedule:', err.message);
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
 }

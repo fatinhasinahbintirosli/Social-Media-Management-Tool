@@ -6,6 +6,8 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 function timeToMinutes(timeStr) {
   if (!timeStr || typeof timeStr !== 'string') return 0;
   const parts = timeStr.trim().split(':');
@@ -106,7 +108,7 @@ export async function POST(request) {
       return NextResponse.json({ success: true, message: `Berjaya dimasukkan ke dalam senarai Auto-Queue (${currentProfile})!` });
     }
 
-    // 2. MOD POS SEKARANG
+    // 2. MOD POS SEKARANG (Serentak untuk pos utama, jeda selamat 3 saat untuk first comment)
     const results = await Promise.allSettled(
       pageIds.map(async (pageId) => {
         const { data: pageData, error: pageError } = await supabase
@@ -131,6 +133,7 @@ export async function POST(request) {
           postData = { caption: message, url: imageUrl, access_token: accessToken };
         }
 
+        // Hantar pos utama
         const fbRes = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -142,19 +145,38 @@ export async function POST(request) {
           throw new Error(fbResult.error?.message || 'Gagal pos ke Facebook');
         }
 
-        if (firstComment && fbResult.id) {
-          const commentEndpoint = `https://graph.facebook.com/v19.0/${fbResult.id}/comments`;
-          let commentData = { message: firstComment, access_token: accessToken };
+        const rawPostId = fbResult.post_id || fbResult.id;
+
+        // Hantar First Comment jika ada
+        if (firstComment && rawPostId) {
+          await sleep(3000); // Jeda 3 saat beri masa Facebook index pos
+
+          const commentParams = new URLSearchParams();
+          commentParams.append('access_token', accessToken);
+          commentParams.append('message', firstComment);
 
           if (commentImageUrl) {
-            commentData.attachment_url = commentImageUrl;
+            commentParams.append('attachment_url', commentImageUrl);
           }
 
-          await fetch(commentEndpoint, {
+          const commentRes = await fetch(`https://graph.facebook.com/v19.0/${rawPostId}/comments`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(commentData),
+            body: commentParams,
           });
+
+          const commentData = await commentRes.json();
+
+          if (commentData.error) {
+            // Cuba sekali lagi (fallback hantar teks sahaja jika attachment gagal)
+            const retryParams = new URLSearchParams();
+            retryParams.append('access_token', accessToken);
+            retryParams.append('message', firstComment);
+
+            await fetch(`https://graph.facebook.com/v19.0/${rawPostId}/comments`, {
+              method: 'POST',
+              body: retryParams,
+            });
+          }
         }
 
         return { pageId, success: true };

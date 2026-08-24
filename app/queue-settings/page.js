@@ -33,11 +33,12 @@ export async function POST(request) {
       let finalScheduledAt = scheduledAt;
 
       if (scheduledAt === 'auto-queue') {
+        // Dapatkan masa Semasa di Malaysia (UTC+8) secara tepat
         const now = new Date();
-        // Zon masa Malaysia (UTC+8)
-        const malaysianTime = new Date(now.getTime() + (8 * 60 * 60 * 1000));
-        const currentTotalMinutes = malaysianTime.getUTCHours() * 60 + malaysianTime.getUTCMinutes();
-        const currentDayOfWeek = malaysianTime.getUTCDay(); // 0 = Ahad, 1 = Isnin, ..., 6 = Sabtu
+        const malaysiaTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kuala_Lumpur' }));
+        
+        const currentTotalMinutes = malaysiaTime.getHours() * 60 + malaysiaTime.getMinutes();
+        const currentDayOfWeek = malaysiaTime.getDay(); // 0 = Ahad, 1 = Isnin, ..., 6 = Sabtu
 
         // Ambil tetapan timeslot mengikut profil DAN hari semasa dari database
         const { data: slotData, error: slotError } = await supabase
@@ -48,7 +49,7 @@ export async function POST(request) {
           .eq('is_active', true);
 
         if (slotError || !slotData || slotData.length === 0) {
-          throw new Error(`Tiada timeslot aktif dijumpai dalam database untuk profil ${currentProfile} pada hari ini.`);
+          throw new Error(`Tiada timeslot aktif dijumpai dalam database untuk profil ${currentProfile} pada hari ini (Hari ke-${currentDayOfWeek}).`);
         }
 
         // Ambil lajur time_slot
@@ -61,7 +62,7 @@ export async function POST(request) {
         }
 
         let nextSlotTimeStr = null;
-        let targetDate = new Date(malaysianTime);
+        let targetDate = new Date(malaysiaTime);
 
         // Susun slot dari awal ke lewat berdasarkan minit
         const sortedSlots = validSlots.sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
@@ -72,16 +73,25 @@ export async function POST(request) {
         } else {
           // Jika sudah lepas semua slot hari ini, ambil slot pertama esok
           nextSlotTimeStr = sortedSlots[0];
-          targetDate.setUTCDate(targetDate.getUTCDate() + 1);
+          targetDate.setDate(targetDate.getDate() + 1);
         }
 
-        // Pecahkan jam dan minit (sokong format 'HH:MM' atau 'HH:MM:SS')
+        // Pecahkan jam dan minit
         const parts = nextSlotTimeStr.trim().split(':');
         const slotHours = parseInt(parts[0], 10);
         const slotMinutes = parseInt(parts[1], 10);
 
-        targetDate.setUTCHours(slotHours, slotMinutes, 0, 0);
-        finalScheduledAt = targetDate.toISOString().replace('Z', '+08:00');
+        targetDate.setHours(slotHours, slotMinutes, 0, 0);
+        
+        // Format semula ke ISO string dengan offset +08:00
+        const year = targetDate.getFullYear();
+        const month = String(targetDate.getMonth() + 1).padStart(2, '0');
+        const day = String(targetDate.getDate()).padStart(2, '0');
+        const hours = String(targetDate.getHours()).padStart(2, '0');
+        const minutes = String(targetDate.getMinutes()).padStart(2, '0');
+        const seconds = String(targetDate.getSeconds()).padStart(2, '0');
+
+        finalScheduledAt = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}+08:00`;
 
       } else if (scheduledAt) {
         finalScheduledAt = new Date(scheduledAt + '+08:00').toISOString();

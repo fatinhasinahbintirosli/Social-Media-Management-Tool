@@ -21,15 +21,24 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Sila pilih sekurang-kurangnya satu Page.' }, { status: 400 });
     }
 
-    // 1. MOD AUTO-QUEUE / JADUAL MANUAL
-    if (scheduledAt === 'auto-queue' || (scheduledAt && new Date(scheduledAt) > new Date())) {
-      // Tentukan nilai masa mengikut mod
+    const currentProfile = profile || 'Fatin';
+
+    // 1. MOD AUTO-QUEUE / JADUAL MANUAL (Pastikan syarat ini menangkap 'auto-queue' dengan tepat)
+    if (scheduledAt === 'auto-queue' || (scheduledAt && scheduledAt !== 'now' && new Date(scheduledAt) > new Date())) {
       let finalScheduledAt = scheduledAt;
+
       if (scheduledAt === 'auto-queue') {
+        // Logik mendapatkan slot masa seterusnya dari table queue_settings berdasarkan profil
+        const { data: slotData } = await supabase
+          .from('queue_settings')
+          .select('time')
+          .eq('profile', currentProfile)
+          .order('time', { ascending: true });
+
+        // Jika anda mempunyai sistem pengiraan slot, letakkan di sini. 
+        // Buat sementara waktu, ia menggunakan masa semasa jika tiada slot khusus dijumpai.
         finalScheduledAt = getLocalISOString();
       } else if (scheduledAt) {
-        // Paksa backend membaca string datetime-local sebagai waktu tempatan Malaysia (UTC+8)
-        // supaya jam yang dipilih (cth: 05:00 AM) tidak beralih kepada 1:00 PM
         finalScheduledAt = new Date(scheduledAt + '+08:00').toISOString();
       }
 
@@ -42,16 +51,16 @@ export async function POST(request) {
         comment_image_url: commentImageUrl,
         scheduled_at: finalScheduledAt,
         status: 'pending',
-        profile: profile || 'Fatin'
+        profile: currentProfile
       };
 
       const { error } = await supabase.from('scheduled_posts').insert([queueData]);
       if (error) throw new Error(error.message);
 
-      return NextResponse.json({ success: true, message: 'Berjaya dimasukkan ke dalam senarai queue sebagai satu hantaran!' });
+      return NextResponse.json({ success: true, message: `Berjaya dimasukkan ke dalam senarai Auto-Queue (${currentProfile})!` });
     }
 
-    // 2. MOD POS SEKARANG
+    // 2. MOD POS SEKARANG (Hanya berjalan jika benar-benar mod 'now')
     const results = await Promise.allSettled(
       pageIds.map(async (pageId) => {
         const { data: pageData, error: pageError } = await supabase
@@ -111,7 +120,7 @@ export async function POST(request) {
       throw new Error(failures[0].reason.message || 'Semua pos gagal dihantar.');
     }
 
-    return NextResponse.json({ 
+    return. NextResponse.json({ 
       success: true, 
       message: failures.length > 0 
         ? `Pos berjaya dihantar ke sesetengah page (${pageIds.length - failures.length}/${pageIds.length}).` 

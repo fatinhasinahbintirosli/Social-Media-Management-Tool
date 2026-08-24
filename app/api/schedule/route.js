@@ -8,13 +8,11 @@ const supabase = createClient(
 
 function timeToMinutes(timeStr) {
   if (!timeStr || typeof timeStr !== 'string') return 0;
-  const parts = timeStr.trim().split(' ');
+  const parts = timeStr.trim().split(':');
   if (parts.length < 2) return 0;
-  const [time, modifier] = parts;
-  let [hours, minutes] = time.split(':').map(Number);
+  const hours = parseInt(parts[0], 10);
+  const minutes = parseInt(parts[1], 10);
   if (isNaN(hours) || isNaN(minutes)) return 0;
-  if (modifier === 'PM' && hours < 12) hours += 12;
-  if (modifier === 'AM' && hours === 12) hours = 0;
   return hours * 60 + minutes;
 }
 
@@ -35,45 +33,55 @@ export async function POST(request) {
 
       if (scheduledAt === 'auto-queue') {
         const now = new Date();
-        const malaysianTime = new Date(now.getTime() + (8 * 60 * 60 * 1000));
-        const currentTotalMinutes = malaysianTime.getUTCHours() * 60 + malaysianTime.getUTCMinutes();
+        const malaysiaTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kuala_Lumpur' }));
+        const currentTotalMinutes = malaysiaTime.getHours() * 60 + malaysiaTime.getMinutes();
 
-        let slotData = null;
-        const queryTry1 = await supabase.from('queue_settings').select('*').eq('profile', currentProfile);
-        if (queryTry1.data && queryTry1.data.length > 0) {
-          slotData = queryTry1.data;
-        } else {
-          const queryTry2 = await supabase.from('queue_settings').select('*');
-          slotData = queryTry2.data;
+        // Ambil terus semua timeslot aktif untuk profil ini dari database
+        const { data: slotData, error: slotError } = await supabase
+          .from('queue_settings')
+          .select('*')
+          .eq('profile', currentProfile)
+          .eq('is_active', true);
+
+        if (slotError || !slotData || slotData.length === 0) {
+          throw new Error(`Tiada timeslot aktif dijumpai dalam database untuk profil ${currentProfile}.`);
         }
 
-        // Tapis hanya data yang mempunyai masa yang sah
-        const validSlots = (slotData || []).map(s => s.time || s.timeslot).filter(t => t && typeof t === 'string');
+        const validSlots = slotData
+          .map(s => s.time_slot)
+          .filter(t => t && typeof t === 'string');
 
         if (validSlots.length === 0) {
-          throw new Error(`Tiada timeslot sah dijumpai dalam database untuk profil ${currentProfile}.`);
+          throw new Error(`Format timeslot tidak sah untuk profil ${currentProfile}.`);
         }
 
-        let nextSlotTimeStr = null;
-        let targetDate = new Date(malaysianTime);
-
-        const sortedSlots = validSlots.sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
+        let targetDate = new Date(malaysiaTime);
+        const uniqueSlots = [...new Set(validSlots)];
+        const sortedSlots = uniqueSlots.sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
+        
         const upcomingSlot = sortedSlots.find(slot => timeToMinutes(slot) > currentTotalMinutes);
+        let nextSlotTimeStr = upcomingSlot;
 
-        if (upcomingSlot) {
-          nextSlotTimeStr = upcomingSlot;
-        } else {
+        if (!nextSlotTimeStr) {
+          // Jika semua masa hari ini telah lepas, ambil slot pertama untuk esok
           nextSlotTimeStr = sortedSlots[0];
-          targetDate.setUTCDate(targetDate.getUTCDate() + 1);
+          targetDate.setDate(targetDate.getDate() + 1);
         }
 
-        const [timePart, modifier] = nextSlotTimeStr.trim().split(' ');
-        let [slotHours, slotMinutes] = timePart.split(':').map(Number);
-        if (modifier === 'PM' && slotHours < 12) slotHours += 12;
-        if (modifier === 'AM' && slotHours === 12) slotHours = 0;
+        const parts = nextSlotTimeStr.trim().split(':');
+        const slotHours = parseInt(parts[0], 10);
+        const slotMinutes = parseInt(parts[1], 10);
 
-        targetDate.setUTCHours(slotHours, slotMinutes, 0, 0);
-        finalScheduledAt = targetDate.toISOString().replace('Z', '+08:00');
+        targetDate.setHours(slotHours, slotMinutes, 0, 0);
+        
+        const year = targetDate.getFullYear();
+        const month = String(targetDate.getMonth() + 1).padStart(2, '0');
+        const day = String(targetDate.getDate()).padStart(2, '0');
+        const hours = String(targetDate.getHours()).padStart(2, '0');
+        const minutes = String(targetDate.getMinutes()).padStart(2, '0');
+        const seconds = String(targetDate.getSeconds()).padStart(2, '0');
+
+        finalScheduledAt = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}+08:00`;
 
       } else if (scheduledAt) {
         finalScheduledAt = new Date(scheduledAt + '+08:00').toISOString();
